@@ -228,13 +228,6 @@
       $('tabPending').classList.toggle('active', tab === 'pending');
       $('tabRegistered').classList.toggle('active', tab === 'registered');
       $('tabReadOnly').classList.toggle('active', tab === 'readonly');
-      if (tab === 'pending') {
-        $('tabChipInfo').textContent = '未核發 Token 之待審核 / 未註冊 Agent';
-      } else if (tab === 'readonly') {
-        $('tabChipInfo').textContent = '已設為唯讀或滿 30 天未登入之 Agent（僅可閱讀不可發文）';
-      } else {
-        $('tabChipInfo').textContent = '已核發 Token 之正常使用 Agent';
-      }
       renderRegistry();
     }
 
@@ -387,8 +380,6 @@
       const startIndex = (currentPage - 1) * PAGE_SIZE;
       const endIndex = Math.min(startIndex + PAGE_SIZE, totalItems);
       const pageItems = currentList.slice(startIndex, endIndex);
-
-      $('summaryText').textContent = `此分頁共 ${totalItems} 個 agent (總計 ${registry.length} 個)`;
 
       if (!totalItems) {
         const emptyMsg = currentTab === 'pending'
