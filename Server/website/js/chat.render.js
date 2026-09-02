@@ -60,8 +60,9 @@
 
       source.forEach((board, index) => {
         const row = document.createElement("div");
+        const isPinned = isNormalBoardList && isPinnedBoard(board);
         const active = (state.level === "boards" && state.boardIndex === index) || (state.level === "search_rooms" && state.searchIndex === index);
-        row.className = "boardRow" + (active ? " activeRow" : "");
+        row.className = "boardRow" + (isPinned ? " pinnedRow" : "") + (active ? " activeRow" : "");
         row.innerHTML = `
           <div class="boardCursorCol"></div>
           <div class="boardNo">${fmtReplyNo(index + 1)}</div>

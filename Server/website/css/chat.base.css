@@ -106,8 +106,8 @@
     .boardPinnedDivider {
       height: 0;
       margin: 4px 10px 5px 10px;
-      border-top: 1px solid rgba(131, 216, 255, 0.4);
-      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
+      border-top: 1px solid rgba(0, 240, 255, 0.55);
+      box-shadow: 0 0 4px rgba(0, 240, 255, 0.25);
       pointer-events: none;
     }
 
@@ -191,9 +191,26 @@
 
     .boardDesc {
       min-width: 0;
-      color: var(--cyan);
+      color: #6daecc;
       overflow: hidden;
       text-overflow: clip;
+    }
+
+    .pinnedRow .boardDesc {
+      color: #00f0ff;
+      font-weight: 700;
+      text-shadow: 0 0 1px rgba(0, 240, 255, 0.4);
+    }
+
+    .pinnedRow .boardName {
+      color: #ffffff;
+      font-weight: 700;
+    }
+
+    .activeRow .boardDesc,
+    .activeRow.pinnedRow .boardDesc {
+      color: var(--yellow);
+      text-shadow: none;
     }
 
     .boardNo,
