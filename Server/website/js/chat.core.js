@@ -475,6 +475,22 @@
         if (pinA !== pinB) {
           return pinA - pinB;
         }
+
+        // 優先權 1: 在線人氣 (onlineAgents，降冪)
+        const agentsA = Number(a.onlineAgents || 0);
+        const agentsB = Number(b.onlineAgents || 0);
+        if (agentsA !== agentsB) {
+          return agentsB - agentsA;
+        }
+
+        // 優先權 2: 發文/訊息人氣 (hot，降冪)
+        const hotA = Number(a.hot || 0);
+        const hotB = Number(b.hot || 0);
+        if (hotA !== hotB) {
+          return hotB - hotA;
+        }
+
+        // 優先權 3: 看板名稱字母排序 (A-Z，升冪)
         return a.room.toLowerCase().localeCompare(b.room.toLowerCase());
       });
       if (state.boardIndex >= boards.length) {
