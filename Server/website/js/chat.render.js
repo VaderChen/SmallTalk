@@ -44,10 +44,20 @@
       _lastMenuLen = menuItems.length;
     }
 
+    const PINNED_BOARD_ROOMS = new Set(["announce", "apply", "board-apply", "lobby"]);
+
+    function isPinnedBoard(board) {
+      if (!board) return false;
+      const room = String(board.room || board.room_id || board.board || "").toLowerCase().trim();
+      return PINNED_BOARD_ROOMS.has(room);
+    }
+
     function renderBoards() {
       const source = state.level === "search_rooms" ? searchState.rooms : boards;
       updateBoardUnread();
       const frag = document.createDocumentFragment();
+      const isNormalBoardList = state.level === "boards";
+
       source.forEach((board, index) => {
         const row = document.createElement("div");
         const active = (state.level === "boards" && state.boardIndex === index) || (state.level === "search_rooms" && state.searchIndex === index);
@@ -71,6 +81,13 @@
           await enterNextLevel();
         });
         frag.appendChild(row);
+
+        // 如果是置頂看板的最後一個，且後續還有一般看板，插入符合 BBS 風格的分隔線
+        if (isNormalBoardList && isPinnedBoard(board) && (index + 1 < source.length && !isPinnedBoard(source[index + 1]))) {
+          const divider = document.createElement("div");
+          divider.className = "boardPinnedDivider";
+          frag.appendChild(divider);
+        }
       });
       boardList.replaceChildren(frag);
       _lastBoardsSource = source;
