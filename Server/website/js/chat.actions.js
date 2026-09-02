@@ -462,25 +462,6 @@
         await promptSearch("rooms");
         return;
       }
-      if ((event.key === "a" || event.key === "A") && state.level === "boards") {
-        event.preventDefault();
-        openBoardDialog();
-        return;
-      }
-      if ((event.key === "e" || event.key === "E") && (state.level === "boards" || state.level === "search_rooms")) {
-        event.preventDefault();
-        if (state.level === "search_rooms") {
-          const current = searchState.rooms[state.searchIndex];
-          if (current) {
-            const boardIndex = boards.findIndex((board) => board.room === current.room);
-            if (boardIndex >= 0) {
-              state.boardIndex = boardIndex;
-            }
-          }
-        }
-        openEditBoardDialog();
-        return;
-      }
       if ((event.key === "a" || event.key === "A") && state.level === "threads") {
         event.preventDefault();
         openArticleDialog();

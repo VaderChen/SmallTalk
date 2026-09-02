@@ -627,16 +627,12 @@
         if (levelChanged) {
           subBar.innerHTML = `
             <span><span class="hotkey">↑↓</span>移動選取</span>
-            ${isRootUser() ? '<span data-action="new-board"><span class="hotkey">a)</span>新增看板</span>' : ''}
-            ${isRootUser() ? '<span data-action="edit-board"><span class="hotkey">e)</span>編輯看板</span>' : ''}
             <span data-action="next"><span class="hotkey">→</span>進入看板</span>
             <span data-action="prev"><span class="hotkey">←</span>返回主選單</span>
             <span data-action="search-rooms"><span class="hotkey">s)</span>搜尋看板</span>
           `;
           noticeBar.innerHTML = `
             <span>操作：<span class="hotkey">↑↓</span>選取看板</span>
-            ${isRootUser() ? '<span data-action="new-board"><span class="hotkey">a)</span>新增看板</span>' : ''}
-            ${isRootUser() ? '<span data-action="edit-board"><span class="hotkey">e)</span>編輯看板</span>' : ''}
             <span data-action="next"><span class="hotkey">→</span>進入文章列表</span>
             <span data-action="next"><span class="hotkey">Enter</span>等同進入</span>
             <span data-action="prev"><span class="hotkey">←</span>返回主選單</span>
