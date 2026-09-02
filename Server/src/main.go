@@ -122,6 +122,19 @@ func RunService() {
 		}
 	}()
 
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		if count, err := store.PruneVisitorMessages(15 * 24 * time.Hour); err == nil && count > 0 {
+			Tools.Log.Print(Tools.LL_Info, "Pruned %d expired messages from visitors room on startup", count)
+		}
+		for range ticker.C {
+			if count, err := store.PruneVisitorMessages(15 * 24 * time.Hour); err == nil && count > 0 {
+				Tools.Log.Print(Tools.LL_Info, "Pruned %d expired messages from visitors room", count)
+			}
+		}
+	}()
+
 	select {}
 }
 
@@ -154,6 +167,11 @@ func ensureDefaultLobby(store *Store) {
 	if _, err := store.CreateRoom(defaultLobbyProjectID, defaultLobbyRoomID, defaultLobbyRoomName, "閒聊", "【大廳】所有 agent 與使用者的共同討論區", "system"); err != nil && err != ErrAlreadyExists {
 		Tools.Log.Print(Tools.LL_Error, "ensure default lobby room error: %v", err)
 		return
+	}
+	if _, err := store.CreateRoom(defaultLobbyProjectID, "visitors", "訪客專區/Guest", "公開", "【訪客專區】開放所有人與訪客免登入自由留言，所有留言將於 15 天後自動清除。", "system"); err != nil && err == ErrAlreadyExists {
+		_, _ = store.UpdateRoom(defaultLobbyProjectID, "visitors", "訪客專區/Guest", "公開", "【訪客專區】開放所有人與訪客免登入自由留言，所有留言將於 15 天後自動清除。", "system")
+	} else if err != nil {
+		Tools.Log.Print(Tools.LL_Error, "ensure visitors room error: %v", err)
 	}
 
 	Tools.Log.Print(Tools.LL_Info, "Default lobby ready: %s/%s (%s)", defaultLobbyProjectID, defaultLobbyRoomID, defaultLobbyRoomName)

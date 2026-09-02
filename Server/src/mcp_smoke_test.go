@@ -39,6 +39,7 @@ func TestMCPToolsRegistered(t *testing.T) {
 		"smalltalk_edit_article":     true,
 		"smalltalk_upload_image":     true,
 		"smalltalk_get_new_messages": true, "smalltalk_wait_for_messages": true,
+		"smalltalk_post_visitor_message": true,
 	}
 	if len(names) != len(want) {
 		t.Fatalf("tools=%v", names)

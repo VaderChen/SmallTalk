@@ -738,10 +738,14 @@ func (s *Store) normalizeMessageAliases(m *Message) {
 		m.ReplyToMessage = strings.TrimSpace(m.ReplyToMessageID)
 	}
 	if s != nil {
-		name := s.resolveAuthorNameLocked(m.AgentID)
-		if name != "" {
-			m.Author = name
-			m.DisplayName = name
+		if strings.TrimSpace(m.Author) == "" {
+			name := s.resolveAuthorNameLocked(m.AgentID)
+			if name != "" {
+				m.Author = name
+			}
+		}
+		if strings.TrimSpace(m.DisplayName) == "" {
+			m.DisplayName = m.Author
 		}
 	}
 }
@@ -906,6 +910,34 @@ func (s *Store) appendMessageToDisk(m Message) error {
 	defer f.Close()
 	_, err = f.Write(append(b, '\n'))
 	return err
+}
+
+func (s *Store) rewriteRoomMessagesOnDisk(projectID, roomID string, msgs []Message) error {
+	dir := s.boardDir(projectID, roomID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "messages.jsonl")
+	tmpPath := path + ".tmp"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	for _, m := range msgs {
+		b, err := json.Marshal(m)
+		if err != nil {
+			continue
+		}
+		if _, err := f.Write(append(b, '\n')); err != nil {
+			f.Close()
+			_ = os.Remove(tmpPath)
+			return err
+		}
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func (s *Store) roomMessagesPath(projectID, roomID string) string {
@@ -1911,7 +1943,7 @@ func (s *Store) ListArticles(projectID, roomID string, opts ArticleRangeOptions)
 				Board:         msg.RoomID,
 				ArticleID:     articleID,
 				Title:         strings.TrimSpace(msg.Title),
-				Author:        s.resolveAuthorNameLocked(msg.AgentID),
+				Author:        firstNonEmpty(msg.DisplayName, msg.Author, s.resolveAuthorNameLocked(msg.AgentID)),
 				RootMessageID: strings.TrimSpace(msg.ID),
 				StartedAt:     msg.TS,
 				UpdatedAt:     msg.TS,
@@ -2093,7 +2125,7 @@ func (s *Store) GetArticle(projectID, roomID, articleID string) (*ArticleSummary
 		ArticleID:     target,
 		Article:       target,
 		Title:         title,
-		Author:        s.resolveAuthorNameLocked(rootMsg.AgentID),
+		Author:        firstNonEmpty(rootMsg.DisplayName, rootMsg.Author, s.resolveAuthorNameLocked(rootMsg.AgentID)),
 		Body:          rootMsg.Text,
 		RootMessageID: rootMsg.ID,
 		RootMessage:   rootMsg.ID,
@@ -2541,4 +2573,59 @@ func (s *Store) ListMessagesAfter(projectID, roomID, afterID string, afterTS tim
 		}
 	}
 	return out, nil
+}
+
+func (s *Store) PruneVisitorMessages(maxAge time.Duration) (int, error) {
+	if s == nil {
+		return 0, nil
+	}
+	if maxAge <= 0 {
+		maxAge = 15 * 24 * time.Hour
+	}
+	cutoff := time.Now().Add(-maxAge)
+	projectID := "default"
+	roomID := "visitors"
+
+	_ = s.EnsureRoomLoaded(projectID, roomID)
+
+	s.mu.RLock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		s.mu.RUnlock()
+		return 0, nil
+	}
+	r, ok := p.Rooms[roomID]
+	if !ok {
+		s.mu.RUnlock()
+		return 0, nil
+	}
+	s.mu.RUnlock()
+
+	r.mu.Lock()
+	retained := make([]Message, 0, len(r.Messages))
+	prunedCount := 0
+	for _, msg := range r.Messages {
+		if msg.TS.Before(cutoff) {
+			prunedCount++
+		} else {
+			retained = append(retained, msg)
+		}
+	}
+	if prunedCount > 0 {
+		r.Messages = retained
+		r.cachedSimpleArticles = nil
+		r.sigAcc = 0
+		for _, m := range retained {
+			r.sigAcc ^= computeMessageSig(m)
+		}
+	}
+	r.mu.Unlock()
+
+	if prunedCount > 0 && s.persistToDisk {
+		_ = s.rewriteRoomMessagesOnDisk(projectID, roomID, retained)
+	}
+	if s.pg != nil {
+		_, _ = s.pg.DeleteMessagesOlderThan(projectID, roomID, cutoff)
+	}
+	return prunedCount, nil
 }

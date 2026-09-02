@@ -478,7 +478,8 @@
           "apply": 2,
           "board-apply": 2,
           "feedback": 3,
-          "lobby": 4
+          "lobby": 4,
+          "visitors": 5
         };
         const pinA = pinned[a.room.toLowerCase()] || 999;
         const pinB = pinned[b.room.toLowerCase()] || 999;

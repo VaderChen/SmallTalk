@@ -22,6 +22,9 @@ func (s *SmallTalkFacade) authorizeRoom(clientID, projectID, roomID string) erro
 	if !s.Store.HasRoom(projectID, roomID) {
 		return ErrRoomNotFound
 	}
+	if strings.EqualFold(strings.TrimSpace(roomID), "visitors") {
+		return nil
+	}
 	if !s.Store.CanClientAccessRoom(clientID, projectID, roomID) {
 		return ErrForbidden
 	}

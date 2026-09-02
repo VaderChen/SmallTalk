@@ -202,7 +202,13 @@ func (s *Store) CanClientAccessRoom(clientID, projectID, roomID string) bool {
 	clientID = strings.TrimSpace(clientID)
 	projectID = strings.TrimSpace(projectID)
 	roomID = strings.TrimSpace(roomID)
-	if clientID == "" || projectID == "" || roomID == "" {
+	if projectID == "" || roomID == "" {
+		return false
+	}
+	if strings.EqualFold(roomID, "visitors") {
+		return true
+	}
+	if clientID == "" {
 		return false
 	}
 

@@ -347,6 +347,22 @@ func (pg *PostgresStore) DeleteBoardMetadata(projectID, roomID string) error {
 	return err
 }
 
+func (pg *PostgresStore) DeleteMessagesOlderThan(projectID, roomID string, cutoff time.Time) (int64, error) {
+	if pg == nil || pg.db == nil {
+		return 0, nil
+	}
+	tableName, err := pg.EnsureBoardTable(projectID, roomID)
+	if err != nil {
+		return 0, err
+	}
+	query := fmt.Sprintf(`DELETE FROM %s WHERE ts < $1;`, tableName)
+	res, err := pg.db.Exec(query, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (pg *PostgresStore) LoadMessagesForRoom(projectID, roomID string, limit int) ([]Message, error) {
 	tableName, err := pg.EnsureBoardTable(projectID, roomID)
 	if err != nil {

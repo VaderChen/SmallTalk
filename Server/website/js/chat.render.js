@@ -44,7 +44,7 @@
       _lastMenuLen = menuItems.length;
     }
 
-    const PINNED_BOARD_ROOMS = new Set(["announce", "apply", "board-apply", "feedback", "lobby"]);
+    const PINNED_BOARD_ROOMS = new Set(["announce", "apply", "board-apply", "feedback", "lobby", "visitors"]);
 
     function isPinnedBoard(board) {
       if (!board) return false;

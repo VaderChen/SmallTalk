@@ -146,6 +146,13 @@ type mcpReplyInput struct {
 	Meta             map[string]any `json:"meta,omitempty"`
 }
 
+type mcpVisitorPostInput struct {
+	Author string         `json:"author,omitempty"`
+	Title  string         `json:"title"`
+	Text   string         `json:"text"`
+	Meta   map[string]any `json:"meta,omitempty"`
+}
+
 type mcpPresenceInput struct {
 	ProjectID string `json:"project_id"`
 	RoomID    string `json:"room_id"`
@@ -500,6 +507,62 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			return mcpToolError(err)
 		}
 		return mcpTextResult(map[string]any{"id": id, "article_id": in.ArticleID, "ts": now.Format(time.RFC3339Nano)})
+	})
+
+	server.AddTool(&mcp.Tool{
+		Name:        "smalltalk_post_visitor_message",
+		Description: "Post a message or article in the Visitor Zone (default/visitors). Open to all visitors and agents without token authentication. Note: visitors can only post new articles (cannot reply, edit, or delete). Messages are automatically purged after 15 days.",
+		InputSchema: mcpSchema(`"title":{"type":"string"},"text":{"type":"string"},"author":{"type":"string"},"meta":{"type":"object"}`, `"title","text"`),
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var in mcpVisitorPostInput
+		if err := decodeMCPArgs(req, &in); err != nil {
+			return mcpToolError(err)
+		}
+		if strings.TrimSpace(in.Title) == "" {
+			return mcpToolError(fmt.Errorf("missing title"))
+		}
+		if strings.TrimSpace(in.Text) == "" {
+			return mcpToolError(fmt.Errorf("missing text"))
+		}
+		clientID := "Guest"
+		authorName := strings.TrimSpace(in.Author)
+		if p, ok := mcpPrincipalFromContext(ctx); ok && p != nil && p.ClientID != "" && !strings.EqualFold(p.ClientID, "guest") {
+			clientID = p.ClientID
+			if authorName == "" {
+				authorName = p.ClientID
+			}
+		}
+		if authorName == "" {
+			authorName = "訪客"
+		}
+
+		id := xid.New().String()
+		now := time.Now()
+		msg := Message{
+			ID:          id,
+			AgentID:     clientID,
+			DisplayName: authorName,
+			Author:      authorName,
+			ProjectID:   "default",
+			RoomID:      "visitors",
+			ArticleID:   id,
+			Title:       strings.TrimSpace(in.Title),
+			Text:        in.Text,
+			TS:          now,
+			Meta:        in.Meta,
+		}
+		if err := facade.PublishMessage(clientID, "default", "visitors", msg); err != nil {
+			return mcpToolError(err)
+		}
+		return mcpTextResult(map[string]any{
+			"ok":         true,
+			"id":         id,
+			"article_id": id,
+			"room_id":    "visitors",
+			"project_id": "default",
+			"ts":         now.Format(time.RFC3339Nano),
+			"notice":     "Message posted to Visitors Zone and will be automatically purged after 15 days.",
+		})
 	})
 
 	server.AddTool(&mcp.Tool{Name: "smalltalk_set_presence", Description: "Set presence for the authenticated connection.", InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"status":{"type":"string"}`, `"project_id","room_id","status"`)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

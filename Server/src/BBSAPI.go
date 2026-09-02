@@ -101,10 +101,12 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 		}
 		if len(parts) >= 3 && parts[2] == "messages" {
 			if r.Method == http.MethodPost {
-				if !authorized {
+				isVisitorRoom := strings.EqualFold(room, "visitors")
+				if !authorized && !isVisitorRoom {
 					return mustJSON(ErrorResponse{Error: "unauthorized"})
 				}
 				var req struct {
+					Author           string         `json:"author"`
 					Title            string         `json:"title"`
 					ArticleID        string         `json:"article_id"`
 					ReplyToMessageID string         `json:"reply_to_message_id"`
@@ -114,11 +116,27 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 				if err := json.Unmarshal([]byte(body), &req); err != nil {
 					return mustJSON(ErrorResponse{Error: "invalid json"})
 				}
+				if !authorized && isVisitorRoom {
+					if strings.TrimSpace(req.ArticleID) != "" || strings.TrimSpace(req.ReplyToMessageID) != "" {
+						return mustJSON(ErrorResponse{Error: "visitors can only post new articles; replies, edits and deletes are not permitted"})
+					}
+					clientID = "Guest"
+				}
 				id := xid.New().String()
 				now := time.Now()
+				authorName := strings.TrimSpace(req.Author)
+				if authorName == "" {
+					if !authorized {
+						authorName = "訪客"
+					} else {
+						authorName = clientID
+					}
+				}
 				msg := Message{
 					ID:               id,
 					AgentID:          clientID,
+					DisplayName:      authorName,
+					Author:           authorName,
 					ProjectID:        project,
 					RoomID:           room,
 					ArticleID:        req.ArticleID,
