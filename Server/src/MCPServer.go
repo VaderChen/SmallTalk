@@ -51,6 +51,13 @@ func withMCPAuth(store *Store, next http.Handler) http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		if store != nil && store.VisitorTracker != nil && principal != nil {
+			agentKey := "agent:" + principal.ClientID
+			if principal.ClientID == "Guest" || principal.ClientID == "" {
+				agentKey = "mcp_guest:" + principal.SourceIP
+			}
+			store.VisitorTracker.RecordVisit(agentKey, true)
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpPrincipalKey{}, principal)))
 	})
 }

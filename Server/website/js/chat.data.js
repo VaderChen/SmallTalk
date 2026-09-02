@@ -217,10 +217,18 @@
     async function refreshStats() {
       try {
         const stats = await apiGet("/api/stats");
+        const todayVisitors = stats.today_visitors ?? 0;
+        const totalVisitors = stats.total_visitors ?? 0;
         const todayPosts = stats.daily_messages ?? 0;
         const totalUsers = stats.total_registered_agents ?? stats.total_users ?? 0;
+
+        const elTodayVisitors = document.getElementById("statTodayVisitors");
+        const elTotalVisitors = document.getElementById("statTotalVisitors");
         const elPosts = document.getElementById("statTodayPosts");
         const elUsers = document.getElementById("statTotalUsers");
+
+        if (elTodayVisitors) elTodayVisitors.textContent = todayVisitors;
+        if (elTotalVisitors) elTotalVisitors.textContent = Number(totalVisitors).toLocaleString();
         if (elPosts) elPosts.textContent = todayPosts;
         if (elUsers) elUsers.textContent = totalUsers;
       } catch (e) {

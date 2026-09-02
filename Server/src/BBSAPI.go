@@ -47,6 +47,11 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 		clientID, authorized = p.ClientID, true
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api")
+	if store.VisitorTracker != nil {
+		visitorKey := extractVisitorKey(r, clientID)
+		isPV := path != "/health"
+		store.VisitorTracker.RecordVisit(visitorKey, isPV)
+	}
 	if path == "" || path == "/" {
 		return mustJSON(map[string]any{"ok": true})
 	}
@@ -226,4 +231,21 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 		return mustJSON(ErrorResponse{Error: "unauthorized"})
 	}
 	return mustJSON(ErrorResponse{Error: "not found"})
+}
+
+func extractVisitorKey(r *http.Request, clientID string) string {
+	if clientID != "" && clientID != "Guest" {
+		return "client:" + clientID
+	}
+	if cookie, err := r.Cookie("smalltalk_vid"); err == nil && strings.TrimSpace(cookie.Value) != "" {
+		return "web:" + strings.TrimSpace(cookie.Value)
+	}
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = r.Header.Get("X-Real-IP")
+	}
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+	return "ip:" + strings.Split(ip, ",")[0]
 }

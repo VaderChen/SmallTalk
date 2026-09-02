@@ -5,6 +5,16 @@
       { key: "F", label: "全文搜尋" }
     ];
 
+    // Ensure visitor ID cookie for anonymous visitor tracking
+    (function initVisitorID() {
+      try {
+        if (!document.cookie.includes("smalltalk_vid=")) {
+          const vid = "vid_" + Math.random().toString(36).slice(2, 11) + Date.now().toString(36);
+          document.cookie = `smalltalk_vid=${vid}; Path=/; Max-Age=31536000; SameSite=Lax`;
+        }
+      } catch (_) {}
+    })();
+
     const LAST_BOARD_KEY = "smalltalk_bbs_last_board";
     const LAST_LEVEL_KEY = "smalltalk_bbs_last_level";
     const READ_STATE_PREFIX = "smalltalk_bbs_read_state";

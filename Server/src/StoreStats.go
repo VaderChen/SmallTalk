@@ -27,6 +27,12 @@ type Stats struct {
 
 	OnlineAgents int `json:"online_agents"`
 
+	// 5) 瀏覽與造訪人次統計
+	TodayVisitors int   `json:"today_visitors"`
+	TotalVisitors int64 `json:"total_visitors"`
+	TodayPageViews int64 `json:"today_page_views"`
+	TotalPageViews int64 `json:"total_page_views"`
+
 	LastMessageTS string `json:"last_message_ts"`
 }
 
@@ -111,6 +117,13 @@ func (s *Store) GetStats(now time.Time) Stats {
 	}
 
 	st.OnlineAgents = len(onlineAgents)
+	if s.VisitorTracker != nil {
+		todayUV, totalUV, todayPV, totalPV := s.VisitorTracker.GetStats(now)
+		st.TodayVisitors = todayUV
+		st.TotalVisitors = totalUV
+		st.TodayPageViews = todayPV
+		st.TotalPageViews = totalPV
+	}
 	if !act.LastMessage.IsZero() {
 		st.LastMessageTS = act.LastMessage.Format(time.RFC3339Nano)
 	}

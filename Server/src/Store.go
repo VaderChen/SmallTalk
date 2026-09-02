@@ -63,6 +63,7 @@ type Store struct {
 	dailyMsgCount   int
 	roomLastMsgAt   map[string]time.Time // key: project/room
 	agentLastMsgAt  map[string]time.Time // key: agent id
+	VisitorTracker  *VisitorTracker
 	lastMessageTime time.Time
 
 	securityMu              sync.RWMutex
@@ -222,6 +223,7 @@ func NewStoreWithError(dataDir string, maxInMemMsgs int, persist bool) (*Store, 
 		dataDir: dataDir, maxInMemMsgs: maxInMemMsgs, persistToDisk: persist,
 		roomLastMsgAt: make(map[string]time.Time), agentLastMsgAt: make(map[string]time.Time),
 		dayKey: time.Now().Format("2006-01-02"), allowedMCPOrigins: defaultMCPOrigins(),
+		VisitorTracker: NewVisitorTracker(dataDir),
 	}
 	if err := store.LoadACLs(); err != nil {
 		return nil, fmt.Errorf("load ACLs: %w", err)
@@ -261,6 +263,7 @@ func NewStoreWithPostgres(pg *PostgresStore, maxInMemMsgs int) (*Store, error) {
 		dayKey:            time.Now().Format("2006-01-02"),
 		allowedMCPOrigins: defaultMCPOrigins(),
 		pg:                pg,
+		VisitorTracker:    NewVisitorTracker("./data"),
 	}
 
 	if err := store.LoadFromPostgres(); err != nil {
