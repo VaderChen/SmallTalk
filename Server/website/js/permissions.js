@@ -345,9 +345,13 @@
       syncPaginationBar('Top', totalPages, totalItems, startIndex, endIndex);
     }
 
+    let _renderSeq = 0;
+
     async function renderRegistry() {
+      const currentSeq = ++_renderSeq;
+      const targetTab = currentTab;
+      const targetPage = currentPage;
       const tbody = $('agentRows');
-      tbody.innerHTML = '';
 
       const pendingList = registry.filter(a => getAgentCategory(a) === 'pending');
       const registeredList = registry.filter(a => getAgentCategory(a) === 'registered');
@@ -358,8 +362,8 @@
       $('badgeReadOnly').textContent = String(readOnlyList.length);
 
       let currentList = [];
-      if (currentTab === 'pending') currentList = pendingList;
-      else if (currentTab === 'readonly') currentList = readOnlyList;
+      if (targetTab === 'pending') currentList = pendingList;
+      else if (targetTab === 'readonly') currentList = readOnlyList;
       else currentList = registeredList;
 
       // 按照字母排列 (A-Z, 不區分大小寫，支援繁體中文自然語序)
@@ -382,9 +386,10 @@
       const pageItems = currentList.slice(startIndex, endIndex);
 
       if (!totalItems) {
-        const emptyMsg = currentTab === 'pending'
+        if (currentSeq !== _renderSeq || currentTab !== targetTab) return;
+        const emptyMsg = targetTab === 'pending'
           ? '目前沒有待審核/未註冊的 agent。'
-          : currentTab === 'readonly'
+          : targetTab === 'readonly'
           ? '目前沒有處於唯讀狀態的 agent。'
           : '目前沒有已註冊的 agent。';
         tbody.innerHTML = `<tr><td colspan="5" class="empty">${emptyMsg}</td></tr>`;
@@ -394,12 +399,26 @@
 
       renderPaginationControls(totalPages, totalItems, startIndex, endIndex);
 
-      for (const agent of pageItems) {
-        let acl = { allow_rooms: [], deny_rooms: [] };
-        try {
-          acl = await apiGet(`/permissions/${encodeURIComponent(agent.client_id)}`);
-        } catch (error) {}
+      // 並行載入當前頁各 Agent ACL 權限資料
+      const acls = await Promise.all(
+        pageItems.map(async (agent) => {
+          try {
+            return await apiGet(`/permissions/${encodeURIComponent(agent.client_id)}`);
+          } catch (_) {
+            return { allow_rooms: [], deny_rooms: [] };
+          }
+        })
+      );
 
+      // 檢查是否已被新的分頁切換或渲染取代
+      if (currentSeq !== _renderSeq || currentTab !== targetTab || currentPage !== targetPage) {
+        return;
+      }
+
+      const frag = document.createDocumentFragment();
+
+      pageItems.forEach((agent, index) => {
+        const acl = acls[index] || { allow_rooms: [], deny_rooms: [] };
         const isReadOnly = agent.read_only || (agent.last_seen_at && (Date.now() - new Date(agent.last_seen_at).getTime() >= 30 * 24 * 60 * 60 * 1000));
         const isAutoReadOnly = !agent.read_only && isReadOnly;
 
@@ -428,23 +447,20 @@
             </div>
           </td>
         `;
-        tbody.appendChild(tr);
+
+        tr.querySelector('[data-issue]')?.addEventListener('click', () => openIssueDialog(agent.client_id));
+        tr.querySelector('[data-acl]')?.addEventListener('click', () => openACLDialog(agent.client_id, agent.display_name || ''));
+        tr.querySelector('[data-toggle-readonly]')?.addEventListener('click', () => toggleReadOnly(agent.client_id, !isReadOnly));
+        tr.querySelector('[data-delete]')?.addEventListener('click', () => deleteAgent(agent.client_id, agent.display_name || ''));
+
+        frag.appendChild(tr);
+      });
+
+      if (currentSeq !== _renderSeq || currentTab !== targetTab || currentPage !== targetPage) {
+        return;
       }
 
-      tbody.querySelectorAll('[data-issue]').forEach((button) => {
-        button.addEventListener('click', () => openIssueDialog(button.getAttribute('data-issue')));
-      });
-      tbody.querySelectorAll('[data-acl]').forEach((button) => {
-        button.addEventListener('click', () => openACLDialog(button.getAttribute('data-acl'), button.getAttribute('data-name') || ''));
-      });
-      tbody.querySelectorAll('[data-toggle-readonly]').forEach((button) => {
-        const clientID = button.getAttribute('data-toggle-readonly');
-        const currentIsReadOnly = button.getAttribute('data-current-readonly') === 'true';
-        button.addEventListener('click', () => toggleReadOnly(clientID, !currentIsReadOnly));
-      });
-      tbody.querySelectorAll('[data-delete]').forEach((button) => {
-        button.addEventListener('click', () => deleteAgent(button.getAttribute('data-delete'), button.getAttribute('data-name') || ''));
-      });
+      tbody.replaceChildren(frag);
     }
 
     async function toggleReadOnly(clientID, makeReadOnly) {
