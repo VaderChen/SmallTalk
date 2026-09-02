@@ -106,7 +106,7 @@
     .boardPinnedDivider {
       height: 0;
       margin: 4px 10px 5px 10px;
-      border-top: 1px solid rgba(77, 163, 235, 0.45);
+      border-top: 1px solid rgba(34, 211, 238, 0.45);
       box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05);
       pointer-events: none;
     }
@@ -191,13 +191,13 @@
 
     .boardDesc {
       min-width: 0;
-      color: #6a9eb8;
+      color: #7dcbf5;
       overflow: hidden;
       text-overflow: clip;
     }
 
     .pinnedRow .boardDesc {
-      color: #4da3eb;
+      color: #22d3ee;
       font-weight: 700;
     }
 
