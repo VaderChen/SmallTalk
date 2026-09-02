@@ -1,3 +1,5 @@
+github.com/MarsSemi/MarsCloud-SaaS/SDK/Go v0.1.16 h1:LVeGimKhDcgwpGQNnJ7FyUmFFxKOVJzgLMraQ9eGFMk=
+github.com/MarsSemi/MarsCloud-SaaS/SDK/Go v0.1.16/go.mod h1:KYfi0zVw8BGQOR+Na3Rz/+ZUaqi88VVl67k7p4iW0bA=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

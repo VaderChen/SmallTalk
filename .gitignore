@@ -24,6 +24,10 @@ Server/src/website/uploads/
 # Legacy version-control metadata
 .svn/
 
+# Third party dependencies
+Server/third_party/
+third_party/
+
 # macOS metadata
 .DS_Store
 **/.DS_Store
