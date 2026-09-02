@@ -110,7 +110,7 @@ func RunService() {
 		service.HttpService.SetDefaultHTML(webEntryPath)
 		service.HttpService.SetDefaultCacheControl("public, max-age=300")
 	}
-	service.RegistryServerInfo("0.2.0", "pack", true)
+	service.RegistryServerInfo(GetVersionTag(), "pack", true)
 	cloud.MCPListeners = startMCPListeners(store, mcpHTTPPort, mcpHTTPSPort, service.Property.OptString("ssl_key", ""), service.Property.OptString("ssl_key_file", ""))
 	service.Start()
 	go func() {

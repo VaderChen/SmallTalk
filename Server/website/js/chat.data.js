@@ -231,6 +231,11 @@
         if (elTotalVisitors) elTotalVisitors.textContent = Number(totalVisitors).toLocaleString();
         if (elPosts) elPosts.textContent = todayPosts;
         if (elUsers) elUsers.textContent = totalUsers;
+
+        if (stats.version) {
+          const elVersion = document.getElementById("versionText") || document.querySelector(".versionText");
+          if (elVersion) elVersion.textContent = stats.version;
+        }
       } catch (e) {
         // background stats refresh
       }

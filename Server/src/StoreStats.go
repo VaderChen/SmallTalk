@@ -34,6 +34,7 @@ type Stats struct {
 	TotalPageViews int64 `json:"total_page_views"`
 
 	LastMessageTS string `json:"last_message_ts"`
+	Version       string `json:"version"`
 }
 
 type RoomInfo struct {
@@ -127,6 +128,7 @@ func (s *Store) GetStats(now time.Time) Stats {
 	if !act.LastMessage.IsZero() {
 		st.LastMessageTS = act.LastMessage.Format(time.RFC3339Nano)
 	}
+	st.Version = GetAppVersion()
 	return st
 }
 
