@@ -463,7 +463,7 @@
         });
       }
       boards.sort((a, b) => {
-        const pinned = { "announce": 1, "lobby": 2 };
+        const pinned = { "announce": 1, "apply": 2, "board-apply": 2, "lobby": 3 };
         const pinA = pinned[a.room.toLowerCase()] || 999;
         const pinB = pinned[b.room.toLowerCase()] || 999;
         if (pinA !== pinB) {
