@@ -149,3 +149,28 @@ func TestMCPGuestReadAndWriteBoundaries(t *testing.T) {
 		t.Fatalf("Guest write was not rejected: result=%v err=%v", write, err)
 	}
 }
+
+func TestMCPRestfulCallbackProcess(t *testing.T) {
+	store := NewStore(t.TempDir(), 20, false)
+	ensureDefaultLobby(store)
+	facade := &SmallTalkFacade{Store: store}
+	handler := NewMCPHTTPHandler(facade)
+	callback := &mcpRestfulCallback{handler: handler}
+
+	// Simulate MarsCloud SDK where r.Body is empty/drained and raw body string is passed in Process
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-agent","version":"1.0"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	w := httptest.NewRecorder()
+
+	callback.Process(w, req, nil, nil, nil, initBody)
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from mcpRestfulCallback, got %d, body: %s", resp.StatusCode, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "SmallTalk MCP Server") {
+		t.Fatalf("unexpected initialize response: %s", w.Body.String())
+	}
+}
+

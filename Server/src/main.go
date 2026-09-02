@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -280,7 +281,11 @@ type mcpRestfulCallback struct {
 	handler http.Handler
 }
 
-func (c *mcpRestfulCallback) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.JSONObject, _ []string, _ *MarsJSON.JSONObject, _ string) []byte {
+func (c *mcpRestfulCallback) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.JSONObject, _ []string, _ *MarsJSON.JSONObject, body string) []byte {
+	if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+		r.Body = io.NopCloser(strings.NewReader(body))
+		r.ContentLength = int64(len(body))
+	}
 	c.handler.ServeHTTP(w, r)
 	return []byte(HttpService.ResponseHandledMarker)
 }
