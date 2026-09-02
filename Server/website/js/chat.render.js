@@ -156,60 +156,326 @@
 
     function renderLinkTag(rawURL, linkText) {
       const url = escapeHTML(rawURL.trim());
-      const label = escapeHTML((linkText || rawURL).trim());
+      const label = (linkText || rawURL).trim();
       return `<a class="articleLink" href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
     }
 
-    function renderRichArticleBody(text) {
-      const source = String(text || "");
-      if (!source) return "";
+    function renderMath(mathCode, displayMode = false) {
+      const code = String(mathCode || "").trim();
+      if (!code) return "";
+      if (typeof window !== "undefined" && window.katex && typeof window.katex.renderToString === "function") {
+        try {
+          return window.katex.renderToString(code, {
+            displayMode,
+            throwOnError: false
+          });
+        } catch (_) {}
+      }
+      const safe = escapeHTML(code);
+      return displayMode ? `<div class="mathBlock">${safe}</div>` : `<span class="mathInline">${safe}</span>`;
+    }
 
+    function parseInlineFormatting(str) {
+      return str
+        .replace(/\*\*(.+?)\*\*/g, '<strong class="mdBold">$1</strong>')
+        .replace(/__(.+?)__/g, '<strong class="mdBold">$1</strong>')
+        .replace(/~~(.+?)~~/g, '<del class="mdDel">$1</del>')
+        .replace(/\*([^*\n]+)\*/g, '<em class="mdItalic">$1</em>')
+        .replace(/(^|\s)_([^_\n]+)_(?=\s|$)/g, '$1<em class="mdItalic">$2</em>');
+    }
+
+    function parseInlineMarkdown(text) {
+      if (!text) return "";
+
+      // 1. Inline code: `code`
+      const codePlaceholders = [];
+      let str = text.replace(/`([^`]+)`/g, (_, code) => {
+        const idx = codePlaceholders.length;
+        codePlaceholders.push(`<code class="inlineCode">${code}</code>`);
+        return `\x1A_CODE_${idx}_\x1A`;
+      });
+
+      // 2. LaTeX Math:
+      const mathPlaceholders = [];
+      str = str.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
+        const idx = mathPlaceholders.length;
+        mathPlaceholders.push(renderMath(math, true));
+        return `\x1A_MATH_${idx}_\x1A`;
+      });
+      str = str.replace(/\\\[([\s\S]+?)\\\]/g, (_, math) => {
+        const idx = mathPlaceholders.length;
+        mathPlaceholders.push(renderMath(math, true));
+        return `\x1A_MATH_${idx}_\x1A`;
+      });
+      str = str.replace(/\\\(([\s\S]+?)\\\)/g, (_, math) => {
+        const idx = mathPlaceholders.length;
+        mathPlaceholders.push(renderMath(math, false));
+        return `\x1A_MATH_${idx}_\x1A`;
+      });
+      str = str.replace(/\$([^\$\n\r]+?)\$/g, (_, math) => {
+        const idx = mathPlaceholders.length;
+        mathPlaceholders.push(renderMath(math, false));
+        return `\x1A_MATH_${idx}_\x1A`;
+      });
+
+      // 3. Images, Links, and URLs
       const tokenRegex = /\[img\]\s*(https?:\/\/[^\s]+?)\s*\[\/img\]|!\[([^\]]*)\]\((https?:\/\/[^\s\)]+)\)|\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)|(https?:\/\/[^\s<>"'()[\]{}]+)/gi;
 
-      let cursor = 0;
-      let html = "";
-      let match;
-
-      while ((match = tokenRegex.exec(source)) !== null) {
-        const before = source.slice(cursor, match.index);
-        if (before) {
-          html += escapeHTML(before).replaceAll("\n", "<br>");
+      str = str.replace(tokenRegex, (match, bbImg, mdImgAlt, mdImgUrl, mdLinkText, mdLinkUrl, plainUrl) => {
+        if (bbImg) {
+          return renderImageTag(bbImg);
         }
-
-        if (match[1]) {
-          // [img]url[/img]
-          html += renderImageTag(match[1]);
-        } else if (match[3]) {
-          // ![alt](url)
-          html += renderImageTag(match[3], match[2]);
-        } else if (match[4] && match[5]) {
-          // [text](url)
-          const linkText = match[4];
-          const linkURL = match[5];
-          if (isImageURL(linkURL)) {
-            html += renderLinkTag(linkURL, linkText) + "<br>" + renderImageTag(linkURL, linkText);
-          } else {
-            html += renderLinkTag(linkURL, linkText);
-          }
-        } else if (match[6]) {
-          // Plain URL (https://...)
-          const rawURL = match[6];
-          if (isImageURL(rawURL)) {
-            html += renderLinkTag(rawURL, rawURL) + "<br>" + renderImageTag(rawURL);
-          } else {
-            html += renderLinkTag(rawURL, rawURL);
-          }
+        if (mdImgUrl) {
+          return renderImageTag(mdImgUrl, mdImgAlt);
         }
+        if (mdLinkText && mdLinkUrl) {
+          const parsedText = parseInlineFormatting(mdLinkText);
+          if (isImageURL(mdLinkUrl)) {
+            return renderLinkTag(mdLinkUrl, parsedText) + "<br>" + renderImageTag(mdLinkUrl, mdLinkText);
+          }
+          return renderLinkTag(mdLinkUrl, parsedText);
+        }
+        if (plainUrl) {
+          if (isImageURL(plainUrl)) {
+            return renderLinkTag(plainUrl, plainUrl) + "<br>" + renderImageTag(plainUrl);
+          }
+          return renderLinkTag(plainUrl, plainUrl);
+        }
+        return match;
+      });
 
-        cursor = match.index + match[0].length;
+      // 4. Bold, Italic, Strikethrough
+      str = parseInlineFormatting(str);
+
+      // 5. Restore LaTeX Math
+      str = str.replace(/\x1A_MATH_(\d+)_\x1A/g, (_, idx) => mathPlaceholders[Number(idx)] || "");
+
+      // 6. Restore inline code
+      str = str.replace(/\x1A_CODE_(\d+)_\x1A/g, (_, idx) => codePlaceholders[Number(idx)] || "");
+
+      return str;
+    }
+
+    function renderRichArticleBody(text) {
+      const raw = String(text || "");
+      if (!raw) return "";
+
+      const lines = raw.split(/\r?\n/);
+      const out = [];
+      let inCodeBlock = false;
+      let codeBlockLang = "";
+      let codeBlockLines = [];
+      let inMathBlock = false;
+      let mathBlockLines = [];
+      let inList = false;
+      let listType = "";
+      let inBlockquote = false;
+      let blockquoteLines = [];
+      let inTable = false;
+      let tableRows = [];
+
+      function flushCodeBlock() {
+        if (!inCodeBlock) return;
+        const codeContent = escapeHTML(codeBlockLines.join("\n"));
+        const langClass = codeBlockLang ? ` language-${escapeHTML(codeBlockLang)}` : "";
+        out.push(`<pre class="codeBlock${langClass}"><code>${codeContent}</code></pre>`);
+        inCodeBlock = false;
+        codeBlockLang = "";
+        codeBlockLines = [];
       }
 
-      const tail = source.slice(cursor);
-      if (tail) {
-        html += escapeHTML(tail).replaceAll("\n", "<br>");
+      function flushMathBlock() {
+        if (!inMathBlock) return;
+        const mathContent = mathBlockLines.join("\n");
+        out.push(`<div class="mathBlockWrap">${renderMath(mathContent, true)}</div>`);
+        inMathBlock = false;
+        mathBlockLines = [];
       }
 
-      return html;
+      function flushList() {
+        if (!inList) return;
+        out.push(listType === "ol" ? "</ol>" : "</ul>");
+        inList = false;
+        listType = "";
+      }
+
+      function flushBlockquote() {
+        if (!inBlockquote) return;
+        const content = blockquoteLines.map(l => parseInlineMarkdown(escapeHTML(l))).join("<br>");
+        out.push(`<blockquote class="mdBlockquote">${content}</blockquote>`);
+        inBlockquote = false;
+        blockquoteLines = [];
+      }
+
+      function flushTable() {
+        if (!inTable) return;
+        if (tableRows.length >= 2) {
+          const headerCells = tableRows[0];
+          const dataRows = tableRows.slice(2);
+          let tableHTML = '<div class="mdTableWrap"><table class="mdTable"><thead><tr>';
+          for (const cell of headerCells) {
+            tableHTML += `<th>${parseInlineMarkdown(escapeHTML(cell.trim()))}</th>`;
+          }
+          tableHTML += '</tr></thead><tbody>';
+          for (const row of dataRows) {
+            tableHTML += '<tr>';
+            for (let i = 0; i < headerCells.length; i++) {
+              const cell = row[i] !== undefined ? row[i].trim() : '';
+              tableHTML += `<td>${parseInlineMarkdown(escapeHTML(cell))}</td>`;
+            }
+            tableHTML += '</tr>';
+          }
+          tableHTML += '</tbody></table></div>';
+          out.push(tableHTML);
+        } else if (tableRows.length === 1) {
+          out.push(`<div>${parseInlineMarkdown(escapeHTML(tableRows[0].join(' | ')))}</div>`);
+        }
+        inTable = false;
+        tableRows = [];
+      }
+
+      function flushAll() {
+        flushList();
+        flushBlockquote();
+        flushTable();
+        flushMathBlock();
+      }
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // 1. Code block fence (```)
+        const fenceMatch = line.match(/^```(\w*)/);
+        if (fenceMatch) {
+          if (inCodeBlock) {
+            flushCodeBlock();
+          } else {
+            flushAll();
+            inCodeBlock = true;
+            codeBlockLang = fenceMatch[1] || "";
+            codeBlockLines = [];
+          }
+          continue;
+        }
+
+        if (inCodeBlock) {
+          codeBlockLines.push(line);
+          continue;
+        }
+
+        const trimmed = line.trim();
+
+        // 2. Math block fence ($$)
+        if (trimmed === "$$") {
+          if (inMathBlock) {
+            flushMathBlock();
+          } else {
+            flushAll();
+            inMathBlock = true;
+            mathBlockLines = [];
+          }
+          continue;
+        }
+
+        if (inMathBlock) {
+          mathBlockLines.push(line);
+          continue;
+        }
+
+        // 3. Horizontal Rule (---, ***, ___)
+        if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+          flushAll();
+          out.push('<hr class="mdHr">');
+          continue;
+        }
+
+        // 4. Headings (#, ##, ###, ####, #####, ######)
+        const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+        if (headingMatch) {
+          flushAll();
+          const level = headingMatch[1].length;
+          const text = parseInlineMarkdown(escapeHTML(headingMatch[2].trim()));
+          out.push(`<h${level} class="mdHeading mdH${level}">${text}</h${level}>`);
+          continue;
+        }
+
+        // 5. Blockquote (> ...)
+        const bqMatch = line.match(/^>\s?(.*)$/);
+        if (bqMatch) {
+          flushList();
+          flushTable();
+          inBlockquote = true;
+          blockquoteLines.push(bqMatch[1]);
+          continue;
+        } else if (inBlockquote) {
+          flushBlockquote();
+        }
+
+        // 6. Table rows (| col1 | col2 |)
+        if (/^\|(.+)\|$/.test(trimmed)) {
+          flushList();
+          flushBlockquote();
+          inTable = true;
+          const cells = trimmed.slice(1, -1).split('|');
+          tableRows.push(cells);
+          continue;
+        } else if (inTable) {
+          flushTable();
+        }
+
+        // 7. Unordered Lists (- item, * item, + item)
+        const ulMatch = line.match(/^\s*[-*+]\s+(.+)$/);
+        if (ulMatch) {
+          flushBlockquote();
+          flushTable();
+          if (!inList || listType !== "ul") {
+            flushList();
+            inList = true;
+            listType = "ul";
+            out.push('<ul class="mdList">');
+          }
+          let itemText = ulMatch[1];
+          if (itemText.startsWith("[ ] ")) {
+            itemText = '<input type="checkbox" disabled class="mdTask"> ' + itemText.slice(4);
+          } else if (itemText.startsWith("[x] ") || itemText.startsWith("[X] ")) {
+            itemText = '<input type="checkbox" checked disabled class="mdTask"> ' + itemText.slice(4);
+          }
+          out.push(`<li>${parseInlineMarkdown(escapeHTML(itemText))}</li>`);
+          continue;
+        }
+
+        // 8. Ordered Lists (1. item, 2. item)
+        const olMatch = line.match(/^\s*(\d+)\.\s+(.+)$/);
+        if (olMatch) {
+          flushBlockquote();
+          flushTable();
+          if (!inList || listType !== "ol") {
+            flushList();
+            inList = true;
+            listType = "ol";
+            out.push('<ol class="mdList">');
+          }
+          out.push(`<li>${parseInlineMarkdown(escapeHTML(olMatch[2]))}</li>`);
+          continue;
+        }
+
+        flushList();
+
+        // 9. Empty lines
+        if (!trimmed) {
+          out.push('<div class="mdEmptyLine"></div>');
+          continue;
+        }
+
+        // 10. Regular text lines
+        out.push(`<div class="mdLine">${parseInlineMarkdown(escapeHTML(line))}</div>`);
+      }
+
+      flushCodeBlock();
+      flushMathBlock();
+      flushAll();
+
+      return out.join("");
     }
 
     function renderArticle() {

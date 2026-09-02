@@ -66,10 +66,184 @@
 
     .articleBody {
       padding: 18px 10px 12px;
-      white-space: pre-wrap;
       line-height: 1.75;
       color: var(--text);
       min-height: 120px;
+    }
+
+    /* Markdown & LaTeX Math Elements */
+    .mdLine {
+      min-height: 1.5em;
+      word-break: break-word;
+    }
+
+    .mdEmptyLine {
+      height: 0.8em;
+    }
+
+    .mdBold {
+      color: var(--yellow);
+      font-weight: 700;
+    }
+
+    .mdItalic {
+      font-style: italic;
+      color: #e2e8f0;
+    }
+
+    .mdDel {
+      text-decoration: line-through;
+      color: var(--muted);
+    }
+
+    .inlineCode {
+      background: rgba(255, 255, 255, 0.1);
+      color: #38bdf8;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-family: inherit;
+      font-size: 0.92em;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .codeBlock {
+      background: #0f172a;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-left: 3px solid #38bdf8;
+      border-radius: 4px;
+      padding: 10px 14px;
+      margin: 8px 0;
+      overflow-x: auto;
+      font-family: inherit;
+      font-size: 0.92em;
+      line-height: 1.5;
+      color: #f1f5f9;
+      white-space: pre;
+    }
+
+    .codeBlock code {
+      background: none;
+      padding: 0;
+      border: none;
+      color: inherit;
+    }
+
+    .mdHeading {
+      margin: 14px 0 6px 0;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .mdH1 {
+      color: var(--yellow);
+      font-size: 1.35em;
+      border-bottom: 1px solid rgba(255, 215, 0, 0.3);
+      padding-bottom: 4px;
+    }
+
+    .mdH2 {
+      color: var(--cyan);
+      font-size: 1.2em;
+      border-bottom: 1px solid rgba(0, 217, 255, 0.2);
+      padding-bottom: 3px;
+    }
+
+    .mdH3 {
+      color: #86efac;
+      font-size: 1.1em;
+    }
+
+    .mdH4, .mdH5, .mdH6 {
+      color: #cbd5e1;
+      font-size: 1em;
+    }
+
+    .mdBlockquote {
+      border-left: 3px solid #00d9ff;
+      background: rgba(0, 217, 255, 0.05);
+      padding: 6px 12px;
+      margin: 8px 0;
+      color: #93c5fd;
+      font-style: normal;
+    }
+
+    .mdHr {
+      border: none;
+      border-top: 1px dashed rgba(255, 255, 255, 0.25);
+      margin: 14px 0;
+    }
+
+    .mdList {
+      margin: 6px 0;
+      padding-left: 24px;
+      line-height: 1.6;
+    }
+
+    .mdList li {
+      margin: 2px 0;
+    }
+
+    .mdTask {
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+
+    .mdTableWrap {
+      overflow-x: auto;
+      margin: 10px 0;
+    }
+
+    .mdTable {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 0.95em;
+    }
+
+    .mdTable th,
+    .mdTable td {
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 6px 12px;
+      text-align: left;
+    }
+
+    .mdTable th {
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--cyan);
+      font-weight: 700;
+    }
+
+    .mdTable tr:nth-child(even) {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .mathBlockWrap {
+      margin: 12px 0;
+      overflow-x: auto;
+      text-align: center;
+    }
+
+    .mathBlock {
+      font-family: KaTeX_Main, "Times New Roman", serif;
+      background: rgba(255, 255, 255, 0.05);
+      border-left: 3px solid var(--yellow);
+      padding: 8px 12px;
+      margin: 8px 0;
+      color: #ffd700;
+    }
+
+    .mathInline {
+      font-family: KaTeX_Main, "Times New Roman", serif;
+      color: #ffd700;
+      padding: 0 2px;
+    }
+
+    .katex {
+      font-size: 1.1em;
+      color: #f8fafc;
+    }
+
+    .katex-display {
+      margin: 10px 0 !important;
     }
 
     .articleLink {
