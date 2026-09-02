@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Go/Tools"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Tools"
 )
 
 type RoomSnapshot struct {

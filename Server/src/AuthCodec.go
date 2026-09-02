@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Go/Security"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Security"
 )
 
 type clientAuthPayload struct {

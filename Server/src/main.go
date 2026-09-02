@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Go/MarsJSON"
-	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Go/MarsService"
-	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Go/Tools"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/HttpService"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/MarsJSON"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/MarsService"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Tools"
 )
 
 const (
@@ -100,14 +101,12 @@ func RunService() {
 
 	facade := &SmallTalkFacade{Store: store}
 	mcpHandler := NewMCPHTTPHandler(facade)
-	service.AddHandler("/mcp", mcpHandler)
-	service.AddHandler("/mcp/", mcpHandler)
+	service.AddRestfulAPI("/mcp", &mcpRestfulCallback{handler: mcpHandler})
 	service.AddRestfulAPI("/auth", authAPI)
 	service.AddRestfulAPI("/permissions", &PermissionsAPI{Store: store})
 	service.AddRestfulAPI("/api", &BBSAPI{Store: store, Facade: facade})
 	if service.HttpService != nil {
 		service.HttpService.SetDefaultHTML(webEntryPath)
-		service.HttpService.SetEnableCache(true)
 		service.HttpService.SetDefaultCacheControl("public, max-age=300")
 	}
 	service.RegistryServerInfo("0.2.0", "pack", true)
@@ -257,4 +256,13 @@ func startMCPListeners(store *Store, httpPort, httpsPort int, certFile, keyFile 
 		}()
 	}
 	return listeners
+}
+
+type mcpRestfulCallback struct {
+	handler http.Handler
+}
+
+func (c *mcpRestfulCallback) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.JSONObject, _ []string, _ *MarsJSON.JSONObject, _ string) []byte {
+	c.handler.ServeHTTP(w, r)
+	return []byte(HttpService.ResponseHandledMarker)
 }

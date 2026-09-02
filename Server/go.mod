@@ -3,7 +3,7 @@ module SmallTalkServer
 go 1.25.6
 
 require (
-	github.com/MarsSemi/MarsCloud-SaaS/SDK/Go v0.1.16
+	github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.20
 	github.com/lib/pq v1.12.3
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/rs/xid v1.4.0
@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/eclipse/paho.mqtt.golang v1.5.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
@@ -41,5 +42,3 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/MarsSemi/MarsCloud-SaaS/SDK/Go => ./third_party/MarsCloud-SaaS

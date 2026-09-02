@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Go/MarsJSON"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/MarsJSON"
 	"github.com/rs/xid"
 )
 

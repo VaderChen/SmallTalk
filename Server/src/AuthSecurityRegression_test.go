@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Go/MarsJSON"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/MarsJSON"
 )
 
 func TestSourceIPIgnoresUntrustedForwardedHeaders(t *testing.T) {

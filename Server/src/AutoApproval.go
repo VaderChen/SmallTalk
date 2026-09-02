@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Go/Tools"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Tools"
 )
 
 type autoApprovalDiskConfig struct {

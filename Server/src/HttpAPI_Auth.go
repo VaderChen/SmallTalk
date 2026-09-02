@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Go/MarsClient"
-	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Go/MarsJSON"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/MarsClient"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/MarsJSON"
 )
 
 type HttpAPI_auth struct {

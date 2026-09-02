@@ -1,3 +1,7 @@
+github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.20 h1:jD45Ufocp/flBVKQXnKC1FKPX5/ZIUv7/jQEYcAtnho=
+github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.20/go.mod h1:CLo5QY0qJz8rcJoxcpA1+U6vsdmdtIvgTvv6OuWzaNg=
+github.com/andybalholm/brotli v1.2.1 h1:R+f5xP285VArJDRgowrfb9DqL18yVK0gKAW/F+eTWro=
+github.com/andybalholm/brotli v1.2.1/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 golang.org/x/crypto v0.46.0/go.mod h1:Evb/oLKmMraqjZ2iQTwDwvCtJkczlDuTmdJXoZVzqU0=

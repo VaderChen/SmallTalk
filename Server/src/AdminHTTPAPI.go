@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Go/MarsJSON"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/MarsJSON"
 )
 
 // PermissionsAPI exposes the root-only HTTP API used by the permissions page.
