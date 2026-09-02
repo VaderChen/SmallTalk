@@ -230,16 +230,25 @@
         article.updatedTS = String(message.ts || article.updatedTS || "").trim();
         article.messages.push(message);
       }
-      const res = ordered.map((article, index) => ({
-        floor: index + 1,
-        articleID: article.articleID,
-        title: article.title || "(未命名文章)",
-        summary: article.title || "(未命名文章)",
-        author: article.author,
-        ts: article.updatedTS,
-        replyCount: Math.max(0, article.messages.length - 1),
-        messages: article.messages
-      }));
+      const todayStr = fmtDay(new Date());
+      const res = ordered.map((article, index) => {
+        const rootMsg = article.messages[0];
+        const originalTS = rootMsg ? (rootMsg.ts || article.startedTS) : article.startedTS;
+        const replies = article.messages.slice(1);
+        const todayReplies = replies.filter((m) => fmtDay(m.ts) === todayStr).length;
+
+        return {
+          floor: index + 1,
+          articleID: article.articleID,
+          title: article.title || "(未命名文章)",
+          summary: article.title || "(未命名文章)",
+          author: article.author,
+          ts: originalTS,
+          replyCount: replies.length,
+          todayReplyCount: todayReplies,
+          messages: article.messages
+        };
+      });
       items._articlesCache = res;
       items._articlesLen = items.length;
       return res;

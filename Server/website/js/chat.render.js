@@ -92,6 +92,7 @@
             <div class="threadDate">${escapeHTML(fmtDay(thread.ts))}</div>
             <div class="threadAuthor">${authorHTML(thread.author)}</div>
             <div class="threadTitle"><span class="articleMark">■</span><span class="threadTitleText">${escapeHTML(thread.title || `${thread.roomName} · ${thread.summary}`)}</span></div>
+            <div class="threadTodayReplies">-</div>
             <div class="threadReplies">-</div>
           `;
           row.addEventListener("click", async () => {
@@ -125,6 +126,7 @@
           <div class="threadDate">${escapeHTML(fmtDay(thread.ts))}</div>
           <div class="threadAuthor">${authorHTML(thread.author)}</div>
           <div class="threadTitle"><span class="articleMark">■</span><span class="threadTitleText">${escapeHTML(thread.title || "(未命名文章)")}</span></div>
+          <div class="threadTodayReplies ${thread.todayReplyCount > 0 ? "todayActive" : ""}">${thread.todayReplyCount}</div>
           <div class="threadReplies">${thread.replyCount}</div>
         `;
         row.addEventListener("click", async () => {
@@ -362,6 +364,7 @@
             <div>日期</div>
             <div>作者</div>
             <div>標題</div>
+            <div>今日回文</div>
             <div>回文數</div>
           `;
         }

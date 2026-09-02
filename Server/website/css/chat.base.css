@@ -143,7 +143,7 @@
 
     .threadHead,
     .threadRow {
-      grid-template-columns: 22px 92px 116px 180px minmax(0, 1fr) 72px;
+      grid-template-columns: 22px 92px 116px 180px minmax(0, 1fr) 84px 72px;
     }
 
     .threadHead > :nth-child(5),
@@ -155,6 +155,7 @@
     .threadAuthor,
     .threadTitle,
     .threadDate,
+    .threadTodayReplies,
     .threadReplies,
     .boardOwner {
       min-width: 0;
@@ -203,6 +204,18 @@
       color: var(--text);
       overflow: hidden;
       text-overflow: clip;
+    }
+
+    .threadTodayReplies {
+      color: var(--muted);
+      text-align: left;
+      overflow: hidden;
+      text-overflow: clip;
+    }
+
+    .threadTodayReplies.todayActive {
+      color: var(--yellow);
+      font-weight: 700;
     }
 
     .threadReplies {
