@@ -613,12 +613,7 @@
             <span data-action="search-messages"><span class="hotkey">F)</span>全文搜尋</span>
             <span data-action="goto-menu"><span class="hotkey">Esc)</span>返回主頁</span>
           `;
-          noticeBar.innerHTML = `
-            <span>操作：<span class="hotkey">↑↓</span>選取</span>
-            <span data-action="next"><span class="hotkey">→</span>進入功能</span>
-            <span data-action="next"><span class="hotkey">Enter</span>等同進入</span>
-            <span data-action="goto-menu"><span class="hotkey">Esc)</span>返回主頁</span>
-          `;
+          noticeBar.innerHTML = "";
           tableHead.className = "tableHead";
           tableHead.textContent = "功能選單";
           breadcrumb.textContent = "主選單｜看板選單";
@@ -659,12 +654,6 @@
               <span data-action="prev"><span class="hotkey">←</span>返回搜尋結果</span>
               <span data-action="search-messages"><span class="hotkey">F)</span>全文搜尋</span>
             `;
-            noticeBar.innerHTML = `
-              <span>操作：<span class="hotkey">↑↓</span>選取文章</span>
-              <span data-action="next"><span class="hotkey">→</span>閱讀內容</span>
-              <span data-action="next"><span class="hotkey">Enter</span>等同閱讀</span>
-              <span data-action="prev"><span class="hotkey">←</span>返回搜尋結果</span>
-            `;
           } else {
             subBar.innerHTML = `
               <span><span class="hotkey">↑↓</span>移動文章</span>
@@ -673,14 +662,8 @@
               <span data-action="prev"><span class="hotkey">←</span>返回看板列表</span>
               <span data-action="search-messages"><span class="hotkey">F)</span>全文搜尋</span>
             `;
-            noticeBar.innerHTML = `
-              <span>操作：<span class="hotkey">↑↓</span>選取文章</span>
-              <span data-action="new-article"><span class="hotkey">a)</span>發表文章</span>
-              <span data-action="next"><span class="hotkey">→</span>閱讀內容</span>
-              <span data-action="next"><span class="hotkey">Enter</span>等同閱讀</span>
-              <span data-action="prev"><span class="hotkey">←</span>返回看板列表</span>
-            `;
           }
+          noticeBar.innerHTML = "";
           tableHead.className = "tableHead threadHead";
           tableHead.innerHTML = `
             <div></div>
@@ -712,15 +695,7 @@
             <span data-action="prev"><span class="hotkey">←</span>返回文章列表</span>
             <span data-action="search-messages"><span class="hotkey">F)</span>全文搜尋</span>
           `;
-          noticeBar.innerHTML = `
-            <span>操作：<span class="hotkey">↑↓</span>小幅捲動</span>
-            <span data-action="reply"><span class="hotkey">Enter</span>回文</span>
-            <span data-action="formal-reply"><span class="hotkey">r)</span>正式回文</span>
-            ${editable ? '<span data-action="edit-article"><span class="hotkey">e)</span>編輯文章</span>' : ''}
-            <span data-action="scroll-down"><span class="hotkey">→</span>等同 PageDown</span>
-            <span data-action="scroll-down"><span class="hotkey">PgUp/PgDn</span>整頁捲動</span>
-            <span data-action="prev"><span class="hotkey">←</span>返回文章列表</span>
-          `;
+          noticeBar.innerHTML = "";
           tableHead.className = "tableHead";
           tableHead.textContent = "文章內容";
         }

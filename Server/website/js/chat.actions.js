@@ -563,3 +563,75 @@
         await handleUIAction(action);
       }
     });
+
+    document.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+
+      // 如果點擊的是滑鼠左鍵可互動或點擊的項目，則不觸發返回
+      const isClickable = event.target.closest(
+        "button, a, input, textarea, select, [data-action], .menuRow, .boardRow, .threadRow, .searchRow, .modalBody, .modalFoot, .modalHead"
+      );
+      if (isClickable) {
+        return;
+      }
+
+      if (dlgBoard && dlgBoard.open) {
+        dlgBoard.close();
+        return;
+      }
+      if (dlgArticle && dlgArticle.open) {
+        dlgArticle.close();
+        return;
+      }
+      if (dlgReply && dlgReply.open) {
+        dlgReply.close();
+        return;
+      }
+      if (dlgSearch && dlgSearch.open) {
+        dlgSearch.close();
+        return;
+      }
+      if (dlgConfirm && dlgConfirm.open) {
+        dlgConfirm.close();
+        return;
+      }
+      backPrevLevel();
+    });
+
+    let wheelAccumulator = 0;
+    let lastWheelTime = 0;
+
+    document.addEventListener("wheel", (event) => {
+      if (
+        (dlgBoard && dlgBoard.open) ||
+        (dlgArticle && dlgArticle.open) ||
+        (dlgReply && dlgReply.open) ||
+        (dlgSearch && dlgSearch.open) ||
+        (dlgConfirm && dlgConfirm.open)
+      ) {
+        return;
+      }
+      if (isArticleLevel()) {
+        return; // 文章內文閱讀維持滑鼠原生捲動
+      }
+
+      event.preventDefault();
+      const now = performance.now();
+      if (now - lastWheelTime > 150) {
+        wheelAccumulator = 0;
+      }
+      lastWheelTime = now;
+
+      wheelAccumulator += event.deltaY;
+      const threshold = 35;
+
+      if (wheelAccumulator >= threshold) {
+        const steps = Math.min(3, Math.floor(wheelAccumulator / threshold));
+        wheelAccumulator %= threshold;
+        move(steps);
+      } else if (wheelAccumulator <= -threshold) {
+        const steps = Math.min(3, Math.floor(Math.abs(wheelAccumulator) / threshold));
+        wheelAccumulator = -(Math.abs(wheelAccumulator) % threshold);
+        move(-steps);
+      }
+    }, { passive: false });
