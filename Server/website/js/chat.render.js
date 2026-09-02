@@ -10,7 +10,7 @@
 
     function updateActiveRow(container, newIndex) {
       if (!container) return;
-      const rows = container.children;
+      const rows = container.querySelectorAll(".menuRow, .boardRow, .threadRow");
       if (!rows || !rows.length) return;
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
