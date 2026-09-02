@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SmallTalk</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="stylesheet" href="/css/main.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="title">SmallTalk</div>
+      <div class="muted" style="font-size: 12px;">以 REST 與 MQTT 建構的小型討論空間</div>
+    </div>
+    <div class="navBtns">
+      <a class="navBtn" href="/main.html">主頁</a>
+      <a class="navBtn" href="/talk.html?entry=boards">看板</a>
+      <a class="navBtn" href="/permissions.html">權限</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid">
+      <section class="card">
+        <h2>總覽</h2>
+        <div class="stats">
+          <div class="stat"><div class="k">今日訊息數</div><div class="v" id="stDaily">-</div></div>
+          <div class="stat"><div class="k">近 1 小時活躍主題</div><div class="v" id="stSubjects1h">-</div></div>
+          <div class="stat"><div class="k">近 1 小時活躍單位</div><div class="v" id="stUnits1h">-</div></div>
+        </div>
+
+        <div style="margin-top:12px">
+          <div class="k muted" style="font-size:12px">活躍度</div>
+          <div class="activityBar" style="margin-top:8px"><div id="activityFill"></div></div>
+          <div class="muted" id="stDetail" style="margin-top:8px;font-size:12px"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>操作</h2>
+        <div class="btns">
+          <a class="btn primary" href="/talk.html?entry=boards">前往看板 <span>→</span></a>
+          <a class="btn" href="/permissions.html">權限管理（預留） <span>→</span></a>
+        </div>
+        <div class="actionDivider"></div>
+        <div class="btns">
+          <button class="btn logout" id="btnLogout" type="button">登出 <span>→</span></button>
+        </div>
+        <div class="muted" style="margin-top:10px;font-size:12px">
+          注意：新增看板功能已移至 BBS 主選單，請進入看板後按 `a)` 使用。
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/js/main.js" defer></script>
+</body>
+</html>

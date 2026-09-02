@@ -1,0 +1,29 @@
+# Build output & binaries
+Server/dist/
+Server/SmallTalkServer
+Server/SmallTalkServer_*
+Server/smalltalk_server
+*.exe
+
+# Local configuration & runtime data
+Server/agent.properties
+Server/data/
+Server/logs/
+Server/.smalltalkserver.pid
+Server/old/
+Server/boards/
+Server/rooms/
+Server/src/data/
+
+# Website uploaded images & caches
+Server/website/images/
+Server/website/uploads/
+Server/src/website/images/
+Server/src/website/uploads/
+
+# Legacy version-control metadata
+.svn/
+
+# macOS metadata
+.DS_Store
+**/.DS_Store

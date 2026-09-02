@@ -1,0 +1,83 @@
+    :root {
+      --bg: #f5f5f5;
+      --panel: #ffffff;
+      --muted: rgba(0,0,0,0.45);
+      --text: rgba(0,0,0,0.92);
+      --accent: #7c3aed;
+      --accent2: #22c55e;
+      --border: rgba(0,0,0,0.12);
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background: radial-gradient(1200px 700px at 20% 10%, rgba(124,58,237,0.08), transparent 55%), radial-gradient(1000px 600px at 80% 30%, rgba(34,197,94,0.08), transparent 55%), var(--bg); color: var(--text); }
+    header { padding: 18px 18px 0 18px; max-width: 1100px; margin: 0 auto; }
+    .brand { display:flex; align-items:center; justify-content:space-between; gap: 12px; }
+    .brand .title { font-weight: 900; letter-spacing: 0.4px; font-size: 20px; }
+    .brand a { color: var(--muted); text-decoration:none; }
+    .brand a:hover { color: var(--text); }
+    .navBtns { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+    .navBtn {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height: 38px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.88);
+      color: var(--text);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 700;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+    }
+    .navBtn:hover { background: rgba(255,255,255,1); }
+
+    main { max-width: 1100px; margin: 0 auto; padding: 18px; }
+    .grid { display:grid; grid-template-columns: 1.2fr 0.8fr; gap: 14px; }
+    @media (max-width: 880px) { .grid { grid-template-columns: 1fr; } }
+
+    .card { border: 1px solid var(--border); background: rgba(255,255,255,0.86); backdrop-filter: blur(6px); border-radius: 16px; padding: 14px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.05); }
+    .card h2 { margin: 0 0 10px 0; font-size: 16px; }
+    .muted { color: var(--muted); }
+
+    .stats { display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    @media (max-width: 520px) { .stats { grid-template-columns: 1fr; } }
+    .stat { border:1px solid var(--border); background: rgba(0,0,0,0.03); border-radius: 14px; padding: 12px; }
+    .stat .k { font-size: 12px; color: var(--muted); }
+    .stat .v { font-size: 22px; font-weight: 900; margin-top: 4px; }
+
+    .activityBar { height: 10px; border: 1px solid var(--border); background: rgba(0,0,0,0.04); border-radius: 999px; overflow:hidden; }
+    .activityBar > div { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent2), var(--accent)); transition: width 0.3s ease; }
+
+    .btns { display:flex; flex-direction:column; gap: 10px; }
+    .btn { display:flex; align-items:center; justify-content:space-between; gap: 10px; padding: 12px 12px; border:1px solid var(--border); background: rgba(0,0,0,0.04); border-radius: 14px; color: var(--text); cursor:pointer; text-decoration:none; }
+    .btn.primary {
+      background: linear-gradient(90deg, #fde68a, #f9a8d4);
+      border-color: rgba(251, 191, 36, 0.35);
+      color: #111827;
+      box-shadow: 0 12px 28px rgba(249, 168, 212, 0.18);
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .actionDivider {
+      margin: 14px 0 12px;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(0,0,0,0.04), rgba(0,0,0,0.14), rgba(0,0,0,0.04));
+    }
+    .btn.logout {
+      background: rgba(239, 68, 68, 0.08);
+      border-color: rgba(239, 68, 68, 0.18);
+      color: #b91c1c;
+    }
+
+    dialog { border:none; border-radius: 16px; padding: 0; background: #ffffff; color: var(--text); width: min(520px, 92vw); box-shadow: 0 18px 44px rgba(15, 23, 42, 0.12); }
+    dialog::backdrop { background: rgba(0,0,0,0.32); }
+    .modalHead { padding: 14px 16px; border-bottom: 1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+    .modalBody { padding: 14px 16px; display:flex; flex-direction:column; gap: 10px; }
+    .modalFoot { padding: 14px 16px; border-top: 1px solid var(--border); display:flex; gap:10px; justify-content:flex-end; }
+    label { font-size: 12px; color: var(--muted); }
+    input, select { width: 100%; padding:10px 10px; background: rgba(0,0,0,0.04); border:1px solid var(--border); border-radius: 10px; color: var(--text); outline:none; }
+    button { padding:10px 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(0,0,0,0.06); color: var(--text); cursor:pointer; }
+    button.primary { background: linear-gradient(90deg, var(--accent), #2563eb); border-color: transparent; }
+
+    .danger { color: #ef4444; }
+  

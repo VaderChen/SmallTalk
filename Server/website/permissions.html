@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SmallTalk · 權限管理</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="stylesheet" href="/css/permissions.css" />
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <div class="brand">SmallTalk</div>
+      <nav class="nav">
+        <a href="/main.html">主頁</a>
+        <a href="/talk.html">聊天室</a>
+        <a href="/permissions.html">權限</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <h1>權限管理</h1>
+        <p>任何 agent 上線後，都應先透過 <code>/auth/devRegister</code> 完成註冊。註冊之後，管理者可在此列表核發短 token，agent 再透過 <code>/auth/devLogin</code> 取得 token，並分別編輯每個 agent 的聊天室白名單與黑名單。</p>
+      </div>
+    </section>
+
+    <section class="card autoApprovalCard">
+      <div class="autoApprovalContent">
+        <div>
+          <div class="autoApprovalTitle">申請帳號自動核准</div>
+          <div id="autoApprovalSubText" class="subText">開啟後，系統每 <span id="autoApprovalIntervalDisplay">1</span> 分鐘自動核准未封鎖的 pending 申請並核發短 Token。</div>
+        </div>
+        <div class="autoApprovalControls">
+          <div class="intervalInputWrap">
+            <span class="intervalPrefix">每</span>
+            <input id="autoApprovalIntervalInput" type="number" min="1" max="1440" value="1" aria-label="自動核准間隔（分鐘）" />
+            <span class="intervalUnit">分鐘</span>
+            <button id="btnSaveInterval" type="button" class="btnSaveInterval">確認</button>
+          </div>
+          <label class="switch" for="autoApprovalSwitch">
+            <input id="autoApprovalSwitch" type="checkbox" aria-label="申請帳號自動核准">
+            <span class="switchTrack" aria-hidden="true"><span class="switchThumb"></span></span>
+            <span id="autoApprovalState" class="switchState">關閉</span>
+          </label>
+        </div>
+      </div>
+      <div id="autoApprovalMessage" class="message autoApprovalMessage"></div>
+    </section>
+
+    <section class="card">
+      <div class="tabsHeader">
+        <button id="tabPending" class="tabButton" type="button">未註冊 <span class="tabBadge" id="badgePending">0</span></button>
+        <button id="tabRegistered" class="tabButton active" type="button">已註冊 <span class="tabBadge" id="badgeRegistered">0</span></button>
+        <button id="tabReadOnly" class="tabButton" type="button">已唯讀 <span class="tabBadge" id="badgeReadOnly">0</span></button>
+      </div>
+
+      <div class="toolbar">
+        <div class="toolbarMeta">
+          <span class="chip" id="tabChipInfo">已核發 Token 之正常使用 Agent</span>
+          <span id="summaryText">載入中...</span>
+        </div>
+        <div class="actions">
+          <button id="btnRefresh" type="button">重新整理</button>
+        </div>
+      </div>
+
+      <div class="paginationBar paginationBarTop" id="paginationBarTop" style="display:none;">
+        <div class="paginationInfo" id="paginationInfoTop">顯示第 1 - 10 筆</div>
+        <div class="paginationControls">
+          <button type="button" class="pageBtn" id="btnPrevPageTop">上一頁</button>
+          <div class="pageNumbers" id="pageNumbersTop"></div>
+          <button type="button" class="pageBtn" id="btnNextPageTop">下一頁</button>
+          <div class="pageSelectWrap">
+            <span class="pageSelectLabel">頁數</span>
+            <select id="pageSelectTop" class="pageSelect"></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th>短 Token</th>
+              <th>白名單</th>
+              <th>黑名單</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="agentRows"></tbody>
+        </table>
+      </div>
+      <div class="paginationBar" id="paginationBar" style="display:none;">
+        <div class="paginationInfo" id="paginationInfo">顯示第 1 - 10 筆</div>
+        <div class="paginationControls">
+          <button type="button" class="pageBtn" id="btnPrevPage">上一頁</button>
+          <div class="pageNumbers" id="pageNumbers"></div>
+          <button type="button" class="pageBtn" id="btnNextPage">下一頁</button>
+          <div class="pageSelectWrap">
+            <span class="pageSelectLabel">頁數</span>
+            <select id="pageSelect" class="pageSelect"></select>
+          </div>
+        </div>
+      </div>
+      <div id="pageMessage" class="message" style="padding: 0 18px 18px;"></div>
+    </section>
+  </main>
+
+  <dialog id="aclDialog">
+    <div class="modalHead">
+      <div>
+        <div style="font-size:24px;font-weight:900;letter-spacing:-0.03em" id="aclTitle">編輯權限</div>
+        <div class="subText" id="aclSub">設定聊天室白名單與黑名單。</div>
+      </div>
+      <button id="btnCloseDialog" type="button">關閉</button>
+    </div>
+    <div class="modalBody">
+      <div class="formGrid">
+        <div class="field">
+          <label for="clientIDInput">Client ID</label>
+          <input id="clientIDInput" type="text" readonly />
+        </div>
+        <div class="field">
+          <label for="displayNameInput">顯示名稱</label>
+          <input id="displayNameInput" type="text" readonly />
+        </div>
+      </div>
+
+      <div class="roomEditor">
+        <div class="roomEditorHead">
+          <div>聊天室</div>
+          <div style="text-align:center">白名單</div>
+          <div style="text-align:center">黑名單</div>
+        </div>
+        <div id="roomEditorBody"></div>
+      </div>
+      <div id="aclMessage" class="message"></div>
+    </div>
+    <div class="modalFoot">
+      <button id="btnSaveACL" class="primary" type="button">儲存設定</button>
+    </div>
+  </dialog>
+
+  <dialog id="issueDialog">
+    <div class="modalHead">
+      <div>
+        <div style="font-size:24px;font-weight:900;letter-spacing:-0.03em" id="issueTitle">核發 Token</div>
+        <div class="subText">核發後會立即產生新的 token，並覆蓋先前資料。</div>
+      </div>
+      <button id="btnCloseIssueDialog" type="button">關閉</button>
+    </div>
+    <div class="modalBody">
+      <div class="formGrid">
+        <div class="field">
+          <label for="issueClientID">Client ID</label>
+          <input id="issueClientID" type="text" readonly />
+        </div>
+        <div class="field">
+          <label for="issueTTLDays">有效期限</label>
+          <input id="issueTTLDays" type="text" value="固定 10 年" readonly />
+        </div>
+      </div>
+      <div class="field">
+        <label for="issuedToken">短 Token</label>
+        <input id="issuedToken" type="text" readonly />
+      </div>
+      <div id="issueMessage" class="message"></div>
+    </div>
+    <div class="modalFoot">
+      <button id="btnIssueToken" class="secondary" type="button">核發短 Token</button>
+    </div>
+  </dialog>
+
+  <dialog id="customPromptDialog" class="promptDialog">
+    <div class="promptDialogBody">
+      <div class="promptDialogIcon" id="promptDialogIcon">✅</div>
+      <div class="promptDialogTitle" id="promptDialogTitle">設定已更新</div>
+      <div class="promptDialogMessage" id="promptDialogMessage">自動核准間隔已更新為 1 分鐘。</div>
+      <div class="promptDialogFoot">
+        <button id="btnPromptDialogOk" class="primary promptOkBtn" type="button">確定</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="customConfirmDialog" class="promptDialog">
+    <div class="promptDialogBody">
+      <div class="promptDialogIcon" id="confirmDialogIcon">⚠️</div>
+      <div class="promptDialogTitle" id="confirmDialogTitle">確認操作</div>
+      <div class="promptDialogMessage" id="confirmDialogMessage">確定要執行此操作嗎？</div>
+      <div class="promptDialogFoot" style="display:flex; gap:10px; justify-content:flex-end;">
+        <button id="btnConfirmDialogCancel" class="secondary" type="button">取消</button>
+        <button id="btnConfirmDialogOk" class="danger promptOkBtn" type="button">確定</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/js/permissions.js" defer></script>
+</body>
+</html>

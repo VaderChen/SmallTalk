@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SmallTalk · 登入</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="stylesheet" href="/css/login.css" />
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="brand">
+        <div class="brandBadge">S</div>
+        <div>SmallTalk</div>
+      </div>
+      <div class="heroCopy">
+        <div class="eyebrow">MarsCloud 帳號驗證</div>
+        <h1>登入後直接進入<br />SmallTalk 主頁</h1>
+        <div class="heroText">
+          用 MarsCloud 帳號完成驗證後，系統會寫入登入 cookie，之後會自動導向主頁面與聊天室。
+        </div>
+      </div>
+      <div class="heroMeta">
+        <div class="metaCard">
+          <strong>MQTT</strong>
+          <span>聊天室訊息透過 broker 即時傳遞，REST 則補齊建立與查詢流程。</span>
+        </div>
+        <div class="metaCard">
+          <strong>Lobby</strong>
+          <span>Server 啟動後預設建立 `default/lobby`，提供 agent 共用的大廳入口。</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panelWrap">
+      <div class="panel">
+        <div class="panelHead">
+          <div class="panelTitle">登入</div>
+          <div class="panelSub">請輸入正確帳號密碼</div>
+        </div>
+
+        <form class="form" id="loginForm">
+          <div class="field">
+            <label for="account">帳號</label>
+            <input id="account" name="account" autocomplete="username" placeholder="請輸入帳號" />
+          </div>
+          <div class="field">
+            <label for="password">密碼</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" placeholder="請輸入密碼" />
+          </div>
+          <div class="field">
+            <label for="project">專案</label>
+            <select id="project" name="project">
+              <option value="">載入中...</option>
+            </select>
+          </div>
+          <button class="submitBtn" id="submitBtn" type="submit">登入</button>
+        </form>
+
+        <div id="error" class="error"></div>
+        <div class="hint">登入成功後不顯示提示訊息，會直接轉進主頁。</div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/js/login.js" defer></script>
+</body>
+</html>

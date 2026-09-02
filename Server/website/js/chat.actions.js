@@ -1,0 +1,584 @@
+    function isArticleLevel() {
+      return state.level === "article" || state.level === "search_article";
+    }
+
+    function scrollArticleBy(delta) {
+      if (!isArticleLevel()) {
+        return;
+      }
+      articleView.scrollBy({
+        top: delta,
+        left: 0,
+        behavior: "auto"
+      });
+    }
+
+    function pageScrollArticle(direction) {
+      if (!isArticleLevel()) {
+        return;
+      }
+      const amount = Math.max(Math.floor(articleView.clientHeight * 0.85), 120);
+      scrollArticleBy(amount * direction);
+    }
+
+    function currentBoardContext() {
+      const board = boards[state.boardIndex];
+      if (!board) return null;
+      return {
+        projectID: board.projectID,
+        roomID: board.roomID,
+        boardName: board.name || board.roomID
+      };
+    }
+
+    function currentArticleContext() {
+      if (state.level === "search_article") {
+        const current = searchState.messages[state.searchIndex];
+        if (!current) return null;
+        return {
+          projectID: current.projectID,
+          roomID: current.roomID,
+          articleID: current.articleID || current.id || "",
+          title: current.title || "(未命名文章)",
+          replyToMessageID: current.id || ""
+        };
+      }
+
+      const board = boards[state.boardIndex];
+      if (!board) return null;
+      const articles = buildArticles((threadCache[board.room]?.items) || []);
+      const current = articles[state.threadIndex];
+      if (!current) return null;
+      const rootMessage = current.messages[0] || null;
+      return {
+        projectID: board.projectID,
+        roomID: board.roomID,
+        articleID: current.articleID || "",
+        title: current.title || "(未命名文章)",
+        replyToMessageID: rootMessage?.id || ""
+      };
+    }
+
+    function openReplyDialog() {
+      const ctx = currentArticleContext();
+      if (!ctx) {
+        footerText.textContent = "目前沒有可回覆的文章";
+        return;
+      }
+      dlgReplyError.style.display = "none";
+      dlgReplyError.textContent = "";
+      replyArticleTitle.value = ctx.title;
+      replyBody.value = "";
+      dlgReply.showModal();
+      setTimeout(() => replyBody.focus(), 0);
+    }
+
+    function openArticleDialog() {
+      const ctx = currentBoardContext();
+      if (!ctx) {
+        footerText.textContent = "目前沒有可發文的看板";
+        return;
+      }
+      articleDialogMode = "new";
+      dlgArticleTitle.textContent = "發表文章";
+      dlgArticleError.style.display = "none";
+      dlgArticleError.textContent = "";
+      articleBoardName.value = ctx.boardName;
+      articleTitle.value = "";
+      articleTitle.readOnly = false;
+      articleBody.value = "";
+      btnSubmitArticle.textContent = "送出文章";
+      dlgArticle.showModal();
+      setTimeout(() => articleTitle.focus(), 0);
+    }
+
+    function openFormalReplyDialog() {
+      const article = currentArticleContext();
+      const board = currentBoardContext();
+      if (!article || !board) {
+        footerText.textContent = "目前沒有可正式回文的文章";
+        return;
+      }
+      articleDialogMode = "formal-reply";
+      dlgArticleTitle.textContent = "發表正式回文";
+      dlgArticleError.style.display = "none";
+      dlgArticleError.textContent = "";
+      articleBoardName.value = board.boardName;
+      articleTitle.value = `Re: ${article.title || "(未命名文章)"}`;
+      articleTitle.readOnly = true;
+      articleBody.value = "";
+      btnSubmitArticle.textContent = "送出正式回文";
+      dlgArticle.showModal();
+      setTimeout(() => articleBody.focus(), 0);
+    }
+
+    function openEditArticleDialog() {
+      const article = currentArticleDetail();
+      const board = currentBoardContext();
+      if (!article || !board) {
+        footerText.textContent = "目前沒有可編輯的文章";
+        return;
+      }
+      if (!canEditCurrentArticle()) {
+        footerText.textContent = "只有作者可在 12 小時內編輯文章";
+        return;
+      }
+      const rootMessage = article.messages[0] || null;
+      if (!rootMessage) {
+        footerText.textContent = "找不到文章內容";
+        return;
+      }
+      articleDialogMode = "edit";
+      dlgArticleTitle.textContent = "編輯文章";
+      dlgArticleError.style.display = "none";
+      dlgArticleError.textContent = "";
+      articleBoardName.value = board.boardName;
+      articleTitle.value = article.title || "(未命名文章)";
+      articleTitle.readOnly = false;
+      articleBody.value = rootMessage.body || "";
+      btnSubmitArticle.textContent = "儲存變更";
+      dlgArticle.showModal();
+      setTimeout(() => articleTitle.focus(), 0);
+    }
+
+    async function submitReply() {
+      const ctx = currentArticleContext();
+      if (!ctx) {
+        dlgReplyError.textContent = "找不到目前文章。";
+        dlgReplyError.style.display = "block";
+        return;
+      }
+      const text = String(replyBody.value || "").trim();
+      if (!text) {
+        dlgReplyError.textContent = "請輸入回文內容。";
+        dlgReplyError.style.display = "block";
+        return;
+      }
+      if (Array.from(text).length > 512) {
+        dlgReplyError.textContent = "回文內容不可超過 512 字。";
+        dlgReplyError.style.display = "block";
+        return;
+      }
+
+      btnSubmitReply.disabled = true;
+      dlgReplyError.style.display = "none";
+      dlgReplyError.textContent = "";
+      try {
+        await apiPost(`/api/boards/${encodeURIComponent(ctx.roomID)}/messages`, {
+          agent_id: getClientID(),
+          text,
+          article: ctx.articleID,
+          title: ctx.title,
+          reply_to_message: ctx.replyToMessageID
+        });
+
+        if (state.level === "search_article") {
+          await runMessageSearch(state.searchQuery);
+        } else {
+          const board = boards[state.boardIndex];
+          if (board) {
+            delete threadCache[board.room];
+            await ensureThreadsLoaded();
+          }
+        }
+
+        dlgReply.close();
+        refreshStats();
+        render(true);
+      } catch (error) {
+        dlgReplyError.textContent = String(error?.message || error || "送出回文失敗");
+        dlgReplyError.style.display = "block";
+      } finally {
+        btnSubmitReply.disabled = false;
+      }
+    }
+
+    function makeArticleID() {
+      const stamp = Date.now().toString(36);
+      const rand = Math.random().toString(36).slice(2, 8);
+      return `article-${stamp}-${rand}`;
+    }
+
+    async function submitArticle() {
+      const ctx = currentBoardContext();
+      if (!ctx) {
+        dlgArticleError.textContent = "找不到目前看板。";
+        dlgArticleError.style.display = "block";
+        return;
+      }
+
+      const title = String(articleTitle.value || "").trim();
+      const text = String(articleBody.value || "").trim();
+      if (!title) {
+        dlgArticleError.textContent = "請輸入文章標題。";
+        dlgArticleError.style.display = "block";
+        return;
+      }
+      if (!text) {
+        dlgArticleError.textContent = "請輸入文章內容。";
+        dlgArticleError.style.display = "block";
+        return;
+      }
+
+      btnSubmitArticle.disabled = true;
+      dlgArticleError.style.display = "none";
+      dlgArticleError.textContent = "";
+      try {
+        let replyToMessageID = "";
+        if (articleDialogMode === "edit") {
+          const article = currentArticleDetail();
+          const rootMessage = article?.messages?.[0];
+          if (!article || !rootMessage) {
+            throw new Error("找不到目前文章。");
+          }
+          await apiPost(`/api/boards/${encodeURIComponent(ctx.roomID)}/messages/${encodeURIComponent(rootMessage.id)}`, {
+            title,
+            text
+          });
+        } else {
+          if (articleDialogMode === "formal-reply") {
+            const current = currentArticleContext();
+            if (!current) {
+              throw new Error("找不到目前文章。");
+            }
+            replyToMessageID = current.replyToMessageID || "";
+          }
+          await apiPost(`/api/boards/${encodeURIComponent(ctx.roomID)}/messages`, {
+            agent_id: getClientID(),
+            text,
+            article: makeArticleID(),
+            title,
+            reply_to_message: replyToMessageID || undefined
+          });
+        }
+
+        const board = boards[state.boardIndex];
+        if (board) {
+          delete threadCache[board.room];
+          const page = await ensureThreadsLoaded();
+          const articles = buildArticles(page.items || []);
+          if (articleDialogMode !== "edit") {
+            state.threadIndex = Math.max(articles.length - 1, 0);
+          }
+        }
+
+        dlgArticle.close();
+        refreshStats();
+        render(true);
+      } catch (error) {
+        dlgArticleError.textContent = String(error?.message || error || "送出文章失敗");
+        dlgArticleError.style.display = "block";
+      } finally {
+        btnSubmitArticle.disabled = false;
+      }
+    }
+
+    async function enterNextLevel() {
+      if (state.level === "menu") {
+        if (state.menuIndex === 2) {
+          await promptSearch("rooms");
+          return;
+        }
+        if (state.menuIndex === 3) {
+          await promptSearch("messages");
+          return;
+        }
+        state.level = "boards";
+      } else if (state.level === "boards") {
+        const page = await ensureThreadsLoaded(true);
+        const lastTS = page.items.length ? page.items[page.items.length - 1].ts : "";
+        markRoomRead(boards[state.boardIndex]?.room, lastTS);
+        updateBoardUnread();
+        state.level = "threads";
+      } else if (state.level === "threads") {
+        await ensureThreadsLoaded(true);
+        state.level = "article";
+        articleView.scrollTop = 0;
+      } else if (state.level === "search_rooms") {
+        const board = searchState.rooms[state.searchIndex];
+        if (!board) {
+          render();
+          return;
+        }
+        const realIndex = boards.findIndex((item) => item.room === board.room);
+        if (realIndex >= 0) {
+          state.boardIndex = realIndex;
+          state.threadIndex = 0;
+          const page = await ensureThreadsLoaded(true);
+          const lastTS = page.items.length ? page.items[page.items.length - 1].ts : "";
+          markRoomRead(boards[state.boardIndex]?.room, lastTS);
+          updateBoardUnread();
+          state.level = "threads";
+        }
+      } else if (state.level === "search_messages") {
+        state.level = "search_article";
+        articleView.scrollTop = 0;
+      }
+      render();
+    }
+
+    function backPrevLevel() {
+      if (state.level === "search_article") {
+        state.level = "search_messages";
+      } else if (state.level === "search_messages") {
+        state.level = "menu";
+      } else if (state.level === "search_rooms") {
+        state.level = "menu";
+      } else if (state.level === "article") {
+        state.level = "threads";
+      } else if (state.level === "threads") {
+        state.level = "boards";
+      } else if (state.level === "boards") {
+        state.level = "menu";
+      }
+      render();
+    }
+
+    function move(delta) {
+      if (state.level === "menu") {
+        state.menuIndex = Math.max(0, Math.min(menuItems.length - 1, state.menuIndex + delta));
+      } else if (state.level === "search_rooms") {
+        state.searchIndex = Math.max(0, Math.min(searchState.rooms.length - 1, state.searchIndex + delta));
+      } else if (state.level === "search_messages") {
+        state.searchIndex = Math.max(0, Math.min(searchState.messages.length - 1, state.searchIndex + delta));
+      } else if (state.level === "boards") {
+        state.boardIndex = Math.max(0, Math.min(boards.length - 1, state.boardIndex + delta));
+        state.threadIndex = 0;
+      } else if (state.level === "threads" || state.level === "article") {
+        const board = boards[state.boardIndex];
+        const articles = board ? buildArticles((threadCache[board.room]?.items) || []) : [];
+        state.threadIndex = Math.max(0, Math.min(Math.max(articles.length - 1, 0), state.threadIndex + delta));
+      } else if (state.level === "search_article") {
+        state.searchIndex = Math.max(0, Math.min(searchState.messages.length - 1, state.searchIndex + delta));
+      }
+      render();
+    }
+
+    document.addEventListener("keydown", async (event) => {
+      if (dlgBoard.open) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          dlgBoard.close();
+        } else if (event.key === "Enter" && !event.shiftKey) {
+          const target = event.target;
+          if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
+            event.preventDefault();
+            await createBoard();
+          }
+        }
+        return;
+      }
+      if (dlgReply.open) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          dlgReply.close();
+          return;
+        }
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault();
+          await submitReply();
+          return;
+        }
+        return;
+      }
+      if (dlgArticle.open) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          dlgArticle.close();
+          return;
+        }
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault();
+          await submitArticle();
+          return;
+        }
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (isArticleLevel()) {
+          scrollArticleBy(-48);
+          return;
+        }
+        move(-1);
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (isArticleLevel()) {
+          scrollArticleBy(48);
+          return;
+        }
+        move(1);
+        return;
+      }
+      if (event.key === "PageUp") {
+        event.preventDefault();
+        if (isArticleLevel()) {
+          pageScrollArticle(-1);
+          return;
+        }
+        move(-10);
+        return;
+      }
+      if (event.key === "PageDown") {
+        event.preventDefault();
+        if (isArticleLevel()) {
+          pageScrollArticle(1);
+          return;
+        }
+        move(10);
+        return;
+      }
+      if (event.key === "ArrowRight" || event.key === "Enter") {
+        event.preventDefault();
+        if (isArticleLevel() && event.key === "ArrowRight") {
+          pageScrollArticle(1);
+          return;
+        }
+        if (isArticleLevel() && event.key === "Enter") {
+          openReplyDialog();
+          return;
+        }
+        await enterNextLevel();
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        backPrevLevel();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (state.level === "menu") {
+          window.location.href = "/main.html";
+          return;
+        }
+        backPrevLevel();
+        return;
+      }
+      if (event.key === "s" || event.key === "S") {
+        event.preventDefault();
+        await promptSearch("rooms");
+        return;
+      }
+      if ((event.key === "a" || event.key === "A") && state.level === "boards") {
+        event.preventDefault();
+        openBoardDialog();
+        return;
+      }
+      if ((event.key === "e" || event.key === "E") && (state.level === "boards" || state.level === "search_rooms")) {
+        event.preventDefault();
+        if (state.level === "search_rooms") {
+          const current = searchState.rooms[state.searchIndex];
+          if (current) {
+            const boardIndex = boards.findIndex((board) => board.room === current.room);
+            if (boardIndex >= 0) {
+              state.boardIndex = boardIndex;
+            }
+          }
+        }
+        openEditBoardDialog();
+        return;
+      }
+      if ((event.key === "a" || event.key === "A") && state.level === "threads") {
+        event.preventDefault();
+        openArticleDialog();
+        return;
+      }
+      if ((event.key === "r" || event.key === "R") && isArticleLevel()) {
+        event.preventDefault();
+        openFormalReplyDialog();
+        return;
+      }
+      if ((event.key === "e" || event.key === "E") && isArticleLevel()) {
+        event.preventDefault();
+        openEditArticleDialog();
+        return;
+      }
+      if (event.key === "f" || event.key === "F") {
+        event.preventDefault();
+        await promptSearch("messages");
+      }
+    });
+
+    newBoardProjectSelect.addEventListener("change", onCreateBoardProjectChanged);
+    btnCloseBoardDlg.addEventListener("click", () => dlgBoard.close());
+    btnDeleteBoard.addEventListener("click", async () => {
+      await deleteBoard();
+    });
+    btnCreateBoard.addEventListener("click", async () => {
+      await createBoard();
+    });
+    btnCloseReplyDlg.addEventListener("click", () => dlgReply.close());
+    btnSubmitReply.addEventListener("click", async () => {
+      await submitReply();
+    });
+    btnCloseArticleDlg.addEventListener("click", () => dlgArticle.close());
+    btnSubmitArticle.addEventListener("click", async () => {
+      await submitArticle();
+    });
+
+    async function handleUIAction(action) {
+      if (!action) return;
+      switch (action) {
+        case "next":
+          await enterNextLevel();
+          break;
+        case "prev":
+          backPrevLevel();
+          break;
+        case "new-board":
+          openBoardDialog();
+          break;
+        case "edit-board":
+          openEditBoardDialog();
+          break;
+        case "new-article":
+          openArticleDialog();
+          break;
+        case "edit-article":
+          openEditArticleDialog();
+          break;
+        case "reply":
+          openReplyDialog();
+          break;
+        case "formal-reply":
+          openFormalReplyDialog();
+          break;
+        case "search-rooms":
+          await promptSearch("rooms");
+          break;
+        case "search-messages":
+          await promptSearch("messages");
+          break;
+        case "goto-boards":
+          state.level = "boards";
+          state.threadIndex = 0;
+          render();
+          break;
+        case "goto-menu":
+          state.level = "menu";
+          render();
+          break;
+        case "scroll-down":
+          articleView.scrollBy({ top: articleView.clientHeight * 0.85, behavior: "smooth" });
+          break;
+      }
+    }
+
+    subBar.addEventListener("click", async (e) => {
+      const span = e.target.closest("span[data-action]");
+      if (span) {
+        const action = span.getAttribute("data-action");
+        await handleUIAction(action);
+      }
+    });
+
+    noticeBar.addEventListener("click", async (e) => {
+      const span = e.target.closest("span[data-action]");
+      if (span) {
+        const action = span.getAttribute("data-action");
+        await handleUIAction(action);
+      }
+    });

@@ -1,0 +1,30 @@
+    @media (max-width: 980px) {
+      .boardHead,
+      .boardRow {
+        grid-template-columns: 22px 70px 100px 84px minmax(140px, 1fr) 66px 90px;
+        font-size: 13px;
+      }
+
+      .threadHead,
+      .threadRow {
+        grid-template-columns: 22px 78px 96px 120px minmax(0, 1fr) 56px;
+        font-size: 13px;
+      }
+
+      .articleHeaderRow {
+        grid-template-columns: 56px minmax(0, 1fr);
+      }
+
+      .articleBoardTag {
+        display: none;
+      }
+
+      .replyRow {
+        grid-template-columns: 24px 110px minmax(0, 1fr);
+      }
+
+      .replyMeta {
+        display: none;
+      }
+    }
+  
