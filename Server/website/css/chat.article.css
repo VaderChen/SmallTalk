@@ -412,10 +412,14 @@
     .notice {
       display: flex;
       min-width: 0;
-      flex: 1 1 auto;
+      flex: 0 0 auto;
       gap: 14px;
       overflow: hidden;
       white-space: nowrap;
+    }
+
+    .notice:empty {
+      display: none;
     }
 
     .notice span {
@@ -432,8 +436,8 @@
       white-space: nowrap;
       flex: 0 0 auto;
       user-select: none;
-      margin-left: auto;
-      margin-right: 14px;
+      margin-left: 0;
+      margin-right: 0;
     }
 
     .statsDivider {
@@ -447,13 +451,14 @@
     }
 
     .versionText {
-      color: var(--muted);
-      font-size: 10px;
-      opacity: 0.55;
+      color: #94a3b8;
+      font-size: 11px;
+      opacity: 0.85;
       letter-spacing: 0.5px;
       text-align: right;
       white-space: nowrap;
       flex: 0 0 auto;
+      margin-left: auto;
     }
 
     .srOnly {
