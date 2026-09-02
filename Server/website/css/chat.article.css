@@ -72,20 +72,44 @@
       min-height: 120px;
     }
 
+    .articleLink {
+      color: #64b5f6;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      word-break: break-all;
+    }
+
+    .articleLink:hover {
+      color: #90caf9;
+      text-decoration: underline;
+    }
+
     .articleImageWrap {
       display: block;
-      width: 50vw;
-      max-width: 50vw;
+      width: fit-content;
+      max-width: min(80vw, 800px);
       margin: 10px 0;
     }
 
     .articleImage {
       display: block;
-      width: 50vw;
-      max-width: 50vw;
+      max-width: min(80vw, 800px);
+      max-height: 600px;
+      width: auto;
       height: auto;
-      border: 1px solid rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.15);
       background: rgba(255, 255, 255, 0.03);
+      border-radius: 4px;
+    }
+
+    .replyBody .articleImageWrap {
+      max-width: min(60vw, 450px);
+      margin: 6px 0;
+    }
+
+    .replyBody .articleImage {
+      max-width: min(60vw, 450px);
+      max-height: 360px;
     }
 
     .articleImageFallback {

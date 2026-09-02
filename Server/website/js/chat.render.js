@@ -140,26 +140,75 @@
       _lastThreadsLen = page && page.items ? page.items.length : 0;
     }
 
+    const IMAGE_EXT_REGEX = /\.(?:png|jpe?g|gif|webp|svg|bmp)(?:\?[^\s<>"']*)?$/i;
+
+    function isImageURL(url) {
+      if (!url || typeof url !== "string") return false;
+      const clean = url.trim().split("#")[0];
+      return IMAGE_EXT_REGEX.test(clean);
+    }
+
+    function renderImageTag(rawURL, altText = "article image") {
+      const url = escapeHTML(rawURL.trim());
+      const alt = escapeHTML((altText || "article image").trim());
+      return `<div class="articleImageWrap"><a href="${url}" target="_blank" rel="noopener noreferrer"><img class="articleImage" src="${url}" alt="${alt}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.style.display='none'; if(this.parentElement && this.parentElement.nextElementSibling) this.parentElement.nextElementSibling.style.display='block';"></a><a class="articleImageFallback" href="${url}" target="_blank" rel="noopener noreferrer" style="display:none;">🖼️ 圖片載入失敗，點此開啟：${url}</a></div>`;
+    }
+
+    function renderLinkTag(rawURL, linkText) {
+      const url = escapeHTML(rawURL.trim());
+      const label = escapeHTML((linkText || rawURL).trim());
+      return `<a class="articleLink" href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    }
+
     function renderRichArticleBody(text) {
       const source = String(text || "");
-      const pattern = /\[img\]\s*(https?:\/\/[^\s]+?)\s*\[\/img\]/gi;
+      if (!source) return "";
+
+      const tokenRegex = /\[img\]\s*(https?:\/\/[^\s]+?)\s*\[\/img\]|!\[([^\]]*)\]\((https?:\/\/[^\s\)]+)\)|\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)|(https?:\/\/[^\s<>"'()[\]{}]+)/gi;
+
       let cursor = 0;
       let html = "";
       let match;
-      while ((match = pattern.exec(source)) !== null) {
+
+      while ((match = tokenRegex.exec(source)) !== null) {
         const before = source.slice(cursor, match.index);
         if (before) {
           html += escapeHTML(before).replaceAll("\n", "<br>");
         }
-        const rawURL = String(match[1] || "").trim();
-        const url = escapeHTML(rawURL);
-        html += `<div class="articleImageWrap"><img class="articleImage" src="${url}" alt="article image" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><a class="articleImageFallback" href="${url}" target="_blank" rel="noopener noreferrer" style="display:none;">圖片載入失敗，點此開啟：${url}</a></div>`;
+
+        if (match[1]) {
+          // [img]url[/img]
+          html += renderImageTag(match[1]);
+        } else if (match[3]) {
+          // ![alt](url)
+          html += renderImageTag(match[3], match[2]);
+        } else if (match[4] && match[5]) {
+          // [text](url)
+          const linkText = match[4];
+          const linkURL = match[5];
+          if (isImageURL(linkURL)) {
+            html += renderLinkTag(linkURL, linkText) + "<br>" + renderImageTag(linkURL, linkText);
+          } else {
+            html += renderLinkTag(linkURL, linkText);
+          }
+        } else if (match[6]) {
+          // Plain URL (https://...)
+          const rawURL = match[6];
+          if (isImageURL(rawURL)) {
+            html += renderLinkTag(rawURL, rawURL) + "<br>" + renderImageTag(rawURL);
+          } else {
+            html += renderLinkTag(rawURL, rawURL);
+          }
+        }
+
         cursor = match.index + match[0].length;
       }
+
       const tail = source.slice(cursor);
       if (tail) {
         html += escapeHTML(tail).replaceAll("\n", "<br>");
       }
+
       return html;
     }
 
@@ -250,7 +299,7 @@
               <div class="${mark.className}">${mark.text}</div>
               <div class="replyNo">${fmtReplyNo(index + 1)}</div>
               <div class="replyAuthor">${authorHTML(message.author)}</div>
-              <div class="replyBody">${escapeHTML(message.body).replaceAll("\n", "<br>")}</div>
+              <div class="replyBody">${renderRichArticleBody(message.body)}</div>
               <div class="replyMeta">${fmtTS(message.ts)}</div>
             </div>
           `;
