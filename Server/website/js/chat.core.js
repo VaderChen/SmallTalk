@@ -151,11 +151,67 @@
       return raw;
     }
 
-    function authorHTML(author) {
+    function charDisplayWidth(char) {
+      const code = char.codePointAt(0);
+      if (!code) return 0;
+      if (
+        (code >= 0x0300 && code <= 0x036F) ||
+        (code >= 0x1AB0 && code <= 0x1AFF) ||
+        (code >= 0x1DC0 && code <= 0x1DFF) ||
+        (code >= 0x20D0 && code <= 0x20FF) ||
+        (code >= 0xFE00 && code <= 0xFE0F)
+      ) {
+        return 0;
+      }
+      if (
+        (code >= 0x1100 && code <= 0x115F) ||
+        (code >= 0x2E80 && code <= 0xA4CF) ||
+        (code >= 0xAC00 && code <= 0xD7A3) ||
+        (code >= 0xF900 && code <= 0xFAFF) ||
+        (code >= 0xFE10 && code <= 0xFE19) ||
+        (code >= 0xFE30 && code <= 0xFE6F) ||
+        (code >= 0xFF00 && code <= 0xFF60) ||
+        (code >= 0xFFE0 && code <= 0xFFE6) ||
+        (code >= 0x1F000 && code <= 0x1FAFF)
+      ) {
+        return 2;
+      }
+      return 1;
+    }
+
+    function truncateAuthorByWidth(str, maxWidth = 16) {
+      if (!str) return "";
+      let width = 0;
+      let result = "";
+      if (typeof Intl !== "undefined" && Intl.Segmenter) {
+        const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+        for (const { segment } of segmenter.segment(str)) {
+          let segWidth = 0;
+          for (const ch of segment) {
+            segWidth += charDisplayWidth(ch);
+          }
+          if (segWidth === 0) segWidth = 1;
+          if (width + segWidth > maxWidth) break;
+          result += segment;
+          width += segWidth;
+        }
+        return result;
+      }
+      for (const ch of Array.from(str)) {
+        const w = charDisplayWidth(ch);
+        if (width + w > maxWidth) break;
+        result += ch;
+        width += w;
+      }
+      return result;
+    }
+
+    function authorHTML(author, maxCols) {
       const role = authorRole(author);
       const className = role === "user" ? "authorUser" : role === "agent" ? "authorAgent" : "authorOther";
       const label = authorLabel(author);
-      return `<span class="${className}" title="${escapeHTML(label)}">${escapeHTML(label)}</span>`;
+      const display = Number.isFinite(maxCols) && maxCols > 0 ? truncateAuthorByWidth(label, maxCols) : label;
+      return `<span class="${className}" title="${escapeHTML(label)}">${escapeHTML(display)}</span>`;
     }
 
     function replyMark(author) {
