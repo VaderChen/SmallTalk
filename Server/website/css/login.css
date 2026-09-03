@@ -31,7 +31,8 @@
       padding: 56px 48px;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
+      justify-content: center;
+      gap: 36px;
     }
     .brand {
       display: inline-flex;
@@ -53,7 +54,7 @@
     }
     .heroCopy {
       max-width: 540px;
-      padding: 48px 0 80px;
+      padding: 24px 0 32px;
     }
     .eyebrow {
       display: inline-flex;
