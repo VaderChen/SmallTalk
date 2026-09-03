@@ -10,26 +10,39 @@
       }, 60000);
       setInterval(() => {
         if (!document.hidden) refreshStats();
-      }, 15000);
+      }, 3000);
+
       let refreshInFlight = false;
-      const refreshVisibleThread = () => {
+      let refreshCycleCount = 0;
+      const refreshVisibleData = async () => {
         if (document.hidden || refreshInFlight) return;
         refreshInFlight = true;
-        refreshActiveThreadData(true).catch((error) => {
+        refreshCycleCount++;
+        try {
+          if (state.level === "threads" || state.level === "article") {
+            await refreshActiveThreadData(true);
+            if (refreshCycleCount % 2 === 0) {
+              await refreshBoardsData();
+            }
+          } else {
+            await refreshBoardsData();
+          }
+        } catch (error) {
           const message = String(error?.message || error || "");
           if (message.includes("unauthorized")) {
             clearSessionAndRedirect();
           }
-        }).finally(() => {
+        } finally {
           refreshInFlight = false;
-        });
+        }
       };
-      setInterval(refreshVisibleThread, 15000);
+      setInterval(refreshVisibleData, 3000);
+
       document.addEventListener("visibilitychange", () => {
         if (!document.hidden) {
           tickStatus();
           refreshStats();
-          refreshVisibleThread();
+          refreshVisibleData();
         }
       }, { passive: true });
       try {

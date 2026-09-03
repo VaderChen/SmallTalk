@@ -536,7 +536,8 @@
       const page = board ? threadCache[board.room] : null;
       const articles = buildArticles(page ? page.items : []);
       const current = articles[state.threadIndex] || articles[0];
-      const articleKey = board && current ? `${board.room}_${current.articleID}_${current.messages.length}` : (board ? `${board.room}_empty` : "none");
+      const articleSig = current ? (current.messages || []).map(m => `${m.id}:${m.ts}:${m.title}:${m.body}`).join("|") : "";
+      const articleKey = board && current ? `${board.room}_${current.articleID}_${articleSig}` : (board ? `${board.room}_empty` : "none");
       if (_lastRenderedArticleKey === articleKey) return;
       _lastRenderedArticleKey = articleKey;
 
@@ -595,7 +596,12 @@
         bodyHTML += `<div class="articleDivider articleContentWidth"></div><div class="articleEmpty articleContentWidth">[系統] 尚有更早文章，下一步可再補向前翻頁。</div>`;
       }
       bodyHTML += `</div>`;
+
+      const prevScroll = articleView ? articleView.scrollTop : 0;
       previewBody.innerHTML = bodyHTML;
+      if (prevScroll > 0 && articleView) {
+        articleView.scrollTop = prevScroll;
+      }
     }
 
     function renderChrome() {

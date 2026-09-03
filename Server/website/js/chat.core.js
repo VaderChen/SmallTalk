@@ -454,8 +454,23 @@
       return false;
     }
 
+    function boardsListSignature(list) {
+      return (list || []).map((b) => [
+        b.room,
+        b.name,
+        b.category,
+        b.description,
+        b.hot,
+        b.owner,
+        b.updated,
+        b.onlineAgents,
+        b.unread
+      ].join("\u0001")).join("\u0002");
+    }
+
     async function loadBoards() {
       const rooms = await apiGet("/api/boards");
+      const currentSelectedRoom = boards[state.boardIndex]?.room || "";
       boards.length = 0;
       for (const room of rooms) {
         boards.push({
@@ -504,7 +519,14 @@
         // 優先權 3: 看板名稱字母排序 (A-Z，升冪)
         return a.room.toLowerCase().localeCompare(b.room.toLowerCase());
       });
-      if (state.boardIndex >= boards.length) {
+      if (currentSelectedRoom) {
+        const foundIdx = boards.findIndex(b => b.room === currentSelectedRoom);
+        if (foundIdx >= 0) {
+          state.boardIndex = foundIdx;
+        } else if (state.boardIndex >= boards.length) {
+          state.boardIndex = Math.max(boards.length - 1, 0);
+        }
+      } else if (state.boardIndex >= boards.length) {
         state.boardIndex = Math.max(boards.length - 1, 0);
       }
       updateBoardUnread();

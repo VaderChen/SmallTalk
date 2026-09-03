@@ -177,6 +177,16 @@
       return threadCache[board.room];
     }
 
+    async function refreshBoardsData() {
+      const previousSignature = typeof boardsListSignature === "function" ? boardsListSignature(boards) : "";
+      await loadBoards();
+      const currentSignature = typeof boardsListSignature === "function" ? boardsListSignature(boards) : "";
+      const dataChanged = !previousSignature || previousSignature !== currentSignature;
+      if (dataChanged && state.level === "boards") {
+        render(true);
+      }
+    }
+
     async function refreshActiveThreadData(force = false) {
       if (!(state.level === "threads" || state.level === "article")) {
         return;
@@ -189,7 +199,8 @@
       const previousPage = threadCache[board.room] || null;
       const previousSignature = threadPageSignature(previousPage);
       const page = await ensureThreadsLoaded(force);
-      const dataChanged = !previousPage || previousSignature !== threadPageSignature(page);
+      const currentSignature = threadPageSignature(page);
+      const dataChanged = !previousPage || previousSignature !== currentSignature;
       const articles = buildArticles(page.items || []);
       if (currentArticleID) {
         const nextIndex = articles.findIndex((article) => article.articleID === currentArticleID);
@@ -204,7 +215,9 @@
       const lastTS = page.items.length ? page.items[page.items.length - 1].ts : "";
       markRoomRead(board.room, lastTS);
       updateBoardUnread();
-      render(dataChanged);
+      if (dataChanged) {
+        render(true);
+      }
     }
 
     function updateBoardUnread() {
