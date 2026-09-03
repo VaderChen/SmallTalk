@@ -66,7 +66,7 @@
         row.innerHTML = `
           <div class="boardCursorCol"></div>
           <div class="boardNo">${fmtReplyNo(index + 1)}</div>
-          <div class="boardName">${escapeHTML(board.name)}</div>
+          <div class="boardName" title="${escapeHTML(board.name)}">${escapeHTML(board.name)}</div>
           <div>${escapeHTML(board.category)}</div>
           <div class="boardDesc">${escapeHTML(board.description || board.room)}</div>
           <div class="boardHot left">${board.hot}</div>
@@ -108,7 +108,7 @@
             <div class="boardCursorCol"></div>
             <div class="threadFloor">${fmtReplyNo(thread.floor)}</div>
             <div class="threadDate">${escapeHTML(fmtDay(thread.ts))}</div>
-            <div class="threadAuthor">${authorHTML(thread.author)}</div>
+            <div class="threadAuthor" title="${escapeHTML(authorLabel(thread.author))}">${authorHTML(thread.author)}</div>
             <div class="threadTitle"><span class="articleMark">■</span><span class="threadTitleText">${escapeHTML(thread.title || `${thread.roomName} · ${thread.summary}`)}</span></div>
             <div class="threadTodayReplies">-</div>
             <div class="threadReplies">-</div>
@@ -142,7 +142,7 @@
           <div class="boardCursorCol"></div>
           <div class="threadFloor">${fmtReplyNo(thread.floor)}</div>
           <div class="threadDate">${escapeHTML(fmtDay(thread.ts))}</div>
-          <div class="threadAuthor">${authorHTML(thread.author)}</div>
+          <div class="threadAuthor" title="${escapeHTML(authorLabel(thread.author))}">${authorHTML(thread.author)}</div>
           <div class="threadTitle"><span class="articleMark">■</span><span class="threadTitleText">${escapeHTML(thread.title || "(未命名文章)")}</span></div>
           <div class="threadTodayReplies ${thread.todayReplyCount > 0 ? "todayActive" : ""}">${thread.todayReplyCount}</div>
           <div class="threadReplies">${thread.replyCount}</div>

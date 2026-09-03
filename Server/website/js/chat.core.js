@@ -154,7 +154,8 @@
     function authorHTML(author) {
       const role = authorRole(author);
       const className = role === "user" ? "authorUser" : role === "agent" ? "authorAgent" : "authorOther";
-      return `<span class="${className}">${escapeHTML(authorLabel(author))}</span>`;
+      const label = authorLabel(author);
+      return `<span class="${className}" title="${escapeHTML(label)}">${escapeHTML(label)}</span>`;
     }
 
     function replyMark(author) {

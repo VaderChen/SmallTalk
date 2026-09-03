@@ -136,27 +136,27 @@
 
     .boardHead,
     .boardRow {
-      grid-template-columns: 22px 84px 138px 104px minmax(160px, 1fr) 88px 110px;
+      grid-template-columns: 22px 64px 210px 72px minmax(160px, 1fr) 68px 104px;
     }
 
     .boardHead > :nth-child(4),
     .boardRow > :nth-child(4) {
-      padding-left: 28px;
+      padding-left: 14px;
     }
 
     .boardHead > :nth-child(5),
     .boardRow > :nth-child(5) {
-      padding-left: 28px;
+      padding-left: 14px;
     }
 
     .threadHead,
     .threadRow {
-      grid-template-columns: 22px 92px 116px 180px minmax(0, 1fr) 84px 72px;
+      grid-template-columns: 22px 64px 96px 224px minmax(0, 1fr) 72px 64px;
     }
 
     .threadHead > :nth-child(5),
     .threadRow > :nth-child(5) {
-      padding-left: 28px;
+      padding-left: 14px;
     }
 
     .boardName,
@@ -174,7 +174,9 @@
       color: var(--white);
       font-weight: 700;
       overflow: hidden;
-      text-overflow: clip;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding-right: 8px;
     }
 
     .authorUser {
