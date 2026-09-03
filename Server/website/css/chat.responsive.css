@@ -1,13 +1,13 @@
     @media (max-width: 980px) {
       .boardHead,
       .boardRow {
-        grid-template-columns: 22px 56px 170px 60px minmax(130px, 1fr) 56px 80px;
+        grid-template-columns: 22px 56px 180px 60px minmax(130px, 1fr) 56px 80px;
         font-size: 13px;
       }
 
       .threadHead,
       .threadRow {
-        grid-template-columns: 22px 56px 84px 180px minmax(0, 1fr) 56px 52px;
+        grid-template-columns: 22px 56px 96px 240px minmax(0, 1fr) 56px 52px;
         font-size: 13px;
       }
 
