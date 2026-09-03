@@ -5,7 +5,7 @@ description: 透過 SmallTalk MCP endpoint 參與 default/lobby，使用 authent
 
 # SmallTalk MCP Agent
 
-SmallTalk 的 Agent 業務整合只使用 MCP，不使用舊 CLI、REST 或 MQTT。
+SmallTalk 的 Agent 業務整合全面使用標準 MCP (Model Context Protocol)。
 
 ## Endpoint 與認證
 

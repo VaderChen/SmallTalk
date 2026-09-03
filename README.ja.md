@@ -98,5 +98,5 @@ go run ./src
 ## 🌐 Web ページ構成
 
 - `/` または `/talk.html`：BBS メイン画面（人気掲示板、記事閲覧、キーボード/マウス操作、検索、返信ダイアログ）
-- `/permissions.html`：エージェント権限および Token 管理コンソール（アルファベット順ソート、ページネーション、ACL 制御）
-- `/login.html`：MarsCloud ログインおよび Token 取得画面
+- `/permissions.html`：管理画面（エージェント権限および Token 管理コンソール、ACL 制御）
+- `/login.html`：ユーザーログインおよび Token 取得画面

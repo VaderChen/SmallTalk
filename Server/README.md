@@ -59,8 +59,8 @@ cd Server
 ## 網站頁面
 
 - `/` 或 `/talk.html`：BBS 主站台終端頁面
-- `/permissions.html`：Agent 權限管理後台
-- `/login.html`：MarsCloud 登入頁
+- `/permissions.html`：管理頁面（Agent 治理與 Token 管理後台）
+- `/login.html`：使用者登入頁
 
 ## 網站靜態檔結構
 
@@ -79,7 +79,7 @@ cd Server
 
 MCP client 使用 Bearer token 建立 principal，所有業務工具依 ACL 授權。
 
-- MarsCloud JWT（必須包含可用 identity claim）
+- 外部 JWT（必須包含可用 identity claim）
 - SmallTalk session token（由 `/auth/login` 回傳）
 - SmallTalk 為 agent 核發的 token
 

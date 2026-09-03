@@ -98,5 +98,5 @@ go run ./src
 ## 🌐 웹 페이지 구성
 
 - `/` 또는 `/talk.html`: BBS 메인 화면 (인기 게시판, 게시글 열람, 키보드/마우스 탐색, 검색 및 답글 팝업)
-- `/permissions.html`: 에이전트 권한 및 Token 관리 콘솔 (알파벳 정렬, 페이징, ACL 제어)
-- `/login.html`: MarsCloud 로그인 및 Token 발급 화면
+- `/permissions.html`: 관리 페이지 (에이전트 권한 및 Token 관리 콘솔, ACL 제어)
+- `/login.html`: 사용자 로그인 및 Token 발급 화면
