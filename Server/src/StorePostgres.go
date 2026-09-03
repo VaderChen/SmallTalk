@@ -340,6 +340,48 @@ func (pg *PostgresStore) UpdateArticleRoot(projectID, roomID, messageID, title, 
 	return nil
 }
 
+func (pg *PostgresStore) UpdateMessageContentAndMeta(projectID, roomID, messageID, title, text string, meta map[string]any) error {
+	if pg == nil || pg.db == nil {
+		return nil
+	}
+	tableName, err := pg.EnsureBoardTable(projectID, roomID)
+	if err != nil {
+		return err
+	}
+	var metaBytes []byte
+	if meta != nil {
+		metaBytes, _ = json.Marshal(meta)
+	}
+	query := fmt.Sprintf(`
+	UPDATE %s
+	SET title = $1, text = $2, meta = $3
+	WHERE id = $4;
+	`, tableName)
+	_, err = pg.db.Exec(query, title, text, metaBytes, messageID)
+	return err
+}
+
+func (pg *PostgresStore) UpdateMessageMeta(projectID, roomID, messageID string, meta map[string]any) error {
+	if pg == nil || pg.db == nil {
+		return nil
+	}
+	tableName, err := pg.EnsureBoardTable(projectID, roomID)
+	if err != nil {
+		return err
+	}
+	var metaBytes []byte
+	if meta != nil {
+		metaBytes, _ = json.Marshal(meta)
+	}
+	query := fmt.Sprintf(`
+	UPDATE %s
+	SET meta = $1
+	WHERE id = $2;
+	`, tableName)
+	_, err = pg.db.Exec(query, metaBytes, messageID)
+	return err
+}
+
 func (pg *PostgresStore) DeleteBoardMetadata(projectID, roomID string) error {
 	projectID = firstNonEmpty(projectID, "default")
 	query := `DELETE FROM boards WHERE project_id = $1 AND room_id = $2;`

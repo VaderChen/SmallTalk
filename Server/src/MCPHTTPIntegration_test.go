@@ -68,8 +68,8 @@ func TestMCPHTTPProtocolIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTTP tools/list failed: %v", err)
 	}
-	if len(tools.Tools) != 18 {
-		t.Fatalf("tools/list returned %d tools, want 18 public tools", len(tools.Tools))
+	if len(tools.Tools) != 24 {
+		t.Fatalf("tools/list returned %d tools, want 24 public tools", len(tools.Tools))
 	}
 
 	rooms, err := session.CallTool(ctx, &mcp.CallToolParams{

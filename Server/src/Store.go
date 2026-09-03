@@ -27,6 +27,8 @@ type articleAccumulator struct {
 	StartedAt     time.Time
 	UpdatedAt     time.Time
 	ReplyCount    int
+	Pinned        bool
+	Locked        bool
 }
 
 type roomHistorySnapshot struct {
@@ -46,6 +48,7 @@ type Store struct {
 
 	projects      map[string]*Project
 	roomACLs      map[string]*ClientRoomACL
+	roomMutes     map[string]*RoomMuteRecord // key: clientID:projectID:roomID
 	agentRegistry map[string]*AgentRegistryEntry
 	authTokens    map[string]*AuthTokenRecord
 
@@ -218,7 +221,7 @@ func NewStoreWithError(dataDir string, maxInMemMsgs int, persist bool) (*Store, 
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
 	store := &Store{
-		projects: make(map[string]*Project), roomACLs: make(map[string]*ClientRoomACL),
+		projects: make(map[string]*Project), roomACLs: make(map[string]*ClientRoomACL), roomMutes: make(map[string]*RoomMuteRecord),
 		agentRegistry: make(map[string]*AgentRegistryEntry), authTokens: make(map[string]*AuthTokenRecord),
 		dataDir: dataDir, maxInMemMsgs: maxInMemMsgs, persistToDisk: persist,
 		roomLastMsgAt: make(map[string]time.Time), agentLastMsgAt: make(map[string]time.Time),
@@ -253,6 +256,7 @@ func NewStoreWithPostgres(pg *PostgresStore, maxInMemMsgs int) (*Store, error) {
 	store := &Store{
 		projects:          make(map[string]*Project),
 		roomACLs:          make(map[string]*ClientRoomACL),
+		roomMutes:         make(map[string]*RoomMuteRecord),
 		agentRegistry:     make(map[string]*AgentRegistryEntry),
 		authTokens:        make(map[string]*AuthTokenRecord),
 		dataDir:           "",
@@ -806,6 +810,30 @@ func (s *Store) AddMessage(m Message) error {
 		}
 	}
 	s.normalizeMessageAliases(&m)
+
+	if muted, reason := s.IsClientMutedInRoom(m.AgentID, m.ProjectID, m.RoomID); muted {
+		r.mu.Unlock()
+		return fmt.Errorf("write access denied: %s", reason)
+	}
+
+	if m.ArticleID != "" && m.ArticleID != m.ID {
+		for i := range r.Messages {
+			parent := &r.Messages[i]
+			targetID := strings.TrimSpace(parent.ArticleID)
+			if targetID == "" {
+				targetID = parent.ID
+			}
+			if targetID == m.ArticleID && strings.TrimSpace(parent.ReplyToMessageID) == "" {
+				if parent.Meta != nil {
+					if locked, ok := parent.Meta["locked"].(bool); ok && locked {
+						r.mu.Unlock()
+						return fmt.Errorf("cannot reply: article is locked by moderator")
+					}
+				}
+				break
+			}
+		}
+	}
 
 	r.Messages = append(r.Messages, m)
 	if s.maxInMemMsgs > 0 && len(r.Messages) > s.maxInMemMsgs {
@@ -1736,6 +1764,380 @@ func (s *Store) rewriteRoomMessagesToDisk(projectID, roomID string, messages []M
 	return nil
 }
 
+func (s *Store) IsBoardModerator(clientID, displayName, projectID, roomID string) bool {
+	clientID = strings.TrimSpace(clientID)
+	displayName = strings.TrimSpace(displayName)
+	projectID = strings.TrimSpace(projectID)
+	roomID = strings.TrimSpace(roomID)
+	if clientID == "" || projectID == "" || roomID == "" {
+		return false
+	}
+	if strings.EqualFold(clientID, "root") {
+		return true
+	}
+	if strings.EqualFold(roomID, "announce") || strings.EqualFold(roomID, "visitors") {
+		return false
+	}
+	if displayName == "" {
+		s.mu.RLock()
+		if entry, ok := s.agentRegistry[clientID]; ok && entry != nil {
+			displayName = strings.TrimSpace(entry.DisplayName)
+		}
+		s.mu.RUnlock()
+	}
+	_ = s.EnsureRoomLoaded(projectID, roomID)
+	s.mu.RLock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		s.mu.RUnlock()
+		return false
+	}
+	r, ok := p.Rooms[roomID]
+	if !ok {
+		s.mu.RUnlock()
+		return false
+	}
+	owner := strings.TrimSpace(r.Owner)
+	s.mu.RUnlock()
+
+	if owner == "" || strings.EqualFold(owner, "system") {
+		return false
+	}
+	return strings.EqualFold(owner, clientID) || (displayName != "" && strings.EqualFold(owner, displayName))
+}
+
+func (s *Store) IsArticleLocked(projectID, roomID, articleID string) (bool, string) {
+	_ = s.EnsureRoomLoaded(projectID, roomID)
+	s.mu.RLock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		s.mu.RUnlock()
+		return false, ""
+	}
+	r, ok := p.Rooms[roomID]
+	if !ok {
+		s.mu.RUnlock()
+		return false, ""
+	}
+	s.mu.RUnlock()
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for i := range r.Messages {
+		msg := &r.Messages[i]
+		if msg.ID == articleID || (strings.TrimSpace(msg.ArticleID) == articleID && strings.TrimSpace(msg.ReplyToMessageID) == "") {
+			if msg.Meta != nil {
+				if locked, ok := msg.Meta["locked"].(bool); ok && locked {
+					reason, _ := msg.Meta["lock_reason"].(string)
+					return true, reason
+				}
+			}
+			break
+		}
+	}
+	return false, ""
+}
+
+func (s *Store) ModeratorDeleteArticle(projectID, roomID, articleID, reason, modName string) (*Message, error) {
+	articleID = strings.TrimSpace(articleID)
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "不符合板規"
+	}
+	if modName == "" {
+		modName = "板主"
+	}
+
+	_ = s.EnsureRoomLoaded(projectID, roomID)
+	s.mu.RLock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrProjectNotFound
+	}
+	r, ok := p.Rooms[roomID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrRoomNotFound
+	}
+	s.mu.RUnlock()
+
+	r.mu.Lock()
+	var rootMsg *Message
+	newText := fmt.Sprintf("[此文章已被版主 %s 刪除，原因: %s]", modName, reason)
+	for i := range r.Messages {
+		msg := &r.Messages[i]
+		targetArticleID := strings.TrimSpace(msg.ArticleID)
+		if targetArticleID == "" {
+			targetArticleID = msg.ID
+		}
+		if targetArticleID != articleID {
+			continue
+		}
+		// Root message of article
+		if strings.TrimSpace(msg.ReplyToMessageID) == "" {
+			if !strings.HasPrefix(msg.Title, "[已刪除]") {
+				msg.Title = "[已刪除] " + msg.Title
+			}
+			msg.Text = newText
+			if msg.Meta == nil {
+				msg.Meta = make(map[string]any)
+			}
+			msg.Meta["deleted"] = true
+			msg.Meta["deleted_by"] = modName
+			msg.Meta["delete_reason"] = reason
+			rootMsgCopy := *msg
+			rootMsg = &rootMsgCopy
+		}
+	}
+	if rootMsg == nil {
+		r.mu.Unlock()
+		return nil, ErrMessageNotFound
+	}
+
+	r.cachedSimpleArticles = nil
+	r.sigAcc = 0
+	for _, m := range r.Messages {
+		r.sigAcc ^= computeMessageSig(m)
+	}
+	r.touchLocked(time.Now())
+	messagesSnapshot := append([]Message(nil), r.Messages...)
+	r.mu.Unlock()
+
+	if s.persistToDisk {
+		_ = s.rewriteRoomMessagesToDisk(projectID, roomID, messagesSnapshot)
+	}
+	if s.pg != nil && rootMsg != nil {
+		_ = s.pg.UpdateMessageContentAndMeta(projectID, roomID, rootMsg.ID, rootMsg.Title, rootMsg.Text, rootMsg.Meta)
+	}
+	s.notifyRoomListeners(projectID, roomID)
+	return rootMsg, nil
+}
+
+func (s *Store) ModeratorDeleteReply(projectID, roomID, messageID, reason, modName string) (*Message, error) {
+	messageID = strings.TrimSpace(messageID)
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "不符合板規"
+	}
+	if modName == "" {
+		modName = "板主"
+	}
+
+	_ = s.EnsureRoomLoaded(projectID, roomID)
+	s.mu.RLock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrProjectNotFound
+	}
+	r, ok := p.Rooms[roomID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrRoomNotFound
+	}
+	s.mu.RUnlock()
+
+	r.mu.Lock()
+	var updated *Message
+	newText := fmt.Sprintf("[此回覆已被版主 %s 刪除，原因: %s]", modName, reason)
+	for i := range r.Messages {
+		msg := &r.Messages[i]
+		if msg.ID != messageID {
+			continue
+		}
+		msg.Text = newText
+		if msg.Meta == nil {
+			msg.Meta = make(map[string]any)
+		}
+		msg.Meta["deleted"] = true
+		msg.Meta["deleted_by"] = modName
+		msg.Meta["delete_reason"] = reason
+		updatedCopy := *msg
+		updated = &updatedCopy
+		break
+	}
+	if updated == nil {
+		r.mu.Unlock()
+		return nil, ErrMessageNotFound
+	}
+
+	r.cachedSimpleArticles = nil
+	r.sigAcc = 0
+	for _, m := range r.Messages {
+		r.sigAcc ^= computeMessageSig(m)
+	}
+	r.touchLocked(time.Now())
+	messagesSnapshot := append([]Message(nil), r.Messages...)
+	r.mu.Unlock()
+
+	if s.persistToDisk {
+		_ = s.rewriteRoomMessagesToDisk(projectID, roomID, messagesSnapshot)
+	}
+	if s.pg != nil && updated != nil {
+		_ = s.pg.UpdateMessageContentAndMeta(projectID, roomID, updated.ID, updated.Title, updated.Text, updated.Meta)
+	}
+	s.notifyRoomListeners(projectID, roomID)
+	return updated, nil
+}
+
+func (s *Store) ModeratorSetArticlePinned(projectID, roomID, articleID string, pinned bool) (*Message, error) {
+	articleID = strings.TrimSpace(articleID)
+	_ = s.EnsureRoomLoaded(projectID, roomID)
+	s.mu.RLock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrProjectNotFound
+	}
+	r, ok := p.Rooms[roomID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrRoomNotFound
+	}
+	s.mu.RUnlock()
+
+	r.mu.Lock()
+	if pinned {
+		pinnedCount := 0
+		for _, m := range r.Messages {
+			if strings.TrimSpace(m.ReplyToMessageID) == "" && m.Meta != nil {
+				if p, ok := m.Meta["pinned"].(bool); ok && p {
+					pinnedCount++
+				}
+			}
+		}
+		if pinnedCount >= 3 {
+			r.mu.Unlock()
+			return nil, fmt.Errorf("pinned articles limit reached (maximum 3 per board)")
+		}
+	}
+
+	var rootMsg *Message
+	for i := range r.Messages {
+		msg := &r.Messages[i]
+		targetArticleID := strings.TrimSpace(msg.ArticleID)
+		if targetArticleID == "" {
+			targetArticleID = msg.ID
+		}
+		if targetArticleID == articleID && strings.TrimSpace(msg.ReplyToMessageID) == "" {
+			if msg.Meta == nil {
+				msg.Meta = make(map[string]any)
+			}
+			msg.Meta["pinned"] = pinned
+			rootCopy := *msg
+			rootMsg = &rootCopy
+			break
+		}
+	}
+	if rootMsg == nil {
+		r.mu.Unlock()
+		return nil, ErrMessageNotFound
+	}
+
+	r.cachedSimpleArticles = nil
+	r.sigAcc = 0
+	for _, m := range r.Messages {
+		r.sigAcc ^= computeMessageSig(m)
+	}
+	r.touchLocked(time.Now())
+	messagesSnapshot := append([]Message(nil), r.Messages...)
+	r.mu.Unlock()
+
+	if s.persistToDisk {
+		_ = s.rewriteRoomMessagesToDisk(projectID, roomID, messagesSnapshot)
+	}
+	if s.pg != nil && rootMsg != nil {
+		_ = s.pg.UpdateMessageMeta(projectID, roomID, rootMsg.ID, rootMsg.Meta)
+	}
+	s.notifyRoomListeners(projectID, roomID)
+	return rootMsg, nil
+}
+
+func (s *Store) ModeratorSetArticleLocked(projectID, roomID, articleID string, locked bool, reason string) (*Message, error) {
+	articleID = strings.TrimSpace(articleID)
+	reason = strings.TrimSpace(reason)
+	_ = s.EnsureRoomLoaded(projectID, roomID)
+	s.mu.RLock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrProjectNotFound
+	}
+	r, ok := p.Rooms[roomID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrRoomNotFound
+	}
+	s.mu.RUnlock()
+
+	r.mu.Lock()
+	var rootMsg *Message
+	for i := range r.Messages {
+		msg := &r.Messages[i]
+		targetArticleID := strings.TrimSpace(msg.ArticleID)
+		if targetArticleID == "" {
+			targetArticleID = msg.ID
+		}
+		if targetArticleID == articleID && strings.TrimSpace(msg.ReplyToMessageID) == "" {
+			if msg.Meta == nil {
+				msg.Meta = make(map[string]any)
+			}
+			msg.Meta["locked"] = locked
+			if locked && reason != "" {
+				msg.Meta["lock_reason"] = reason
+			} else if !locked {
+				delete(msg.Meta, "lock_reason")
+			}
+			rootCopy := *msg
+			rootMsg = &rootCopy
+			break
+		}
+	}
+	if rootMsg == nil {
+		r.mu.Unlock()
+		return nil, ErrMessageNotFound
+	}
+
+	r.cachedSimpleArticles = nil
+	r.sigAcc = 0
+	for _, m := range r.Messages {
+		r.sigAcc ^= computeMessageSig(m)
+	}
+	r.touchLocked(time.Now())
+	messagesSnapshot := append([]Message(nil), r.Messages...)
+	r.mu.Unlock()
+
+	if s.persistToDisk {
+		_ = s.rewriteRoomMessagesToDisk(projectID, roomID, messagesSnapshot)
+	}
+	if s.pg != nil && rootMsg != nil {
+		_ = s.pg.UpdateMessageMeta(projectID, roomID, rootMsg.ID, rootMsg.Meta)
+	}
+	s.notifyRoomListeners(projectID, roomID)
+	return rootMsg, nil
+}
+
+func (s *Store) ModeratorUpdateBoardDesc(projectID, roomID, description, category string) (*Room, error) {
+	_ = s.EnsureRoomLoaded(projectID, roomID)
+	s.mu.RLock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrProjectNotFound
+	}
+	r, ok := p.Rooms[roomID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrRoomNotFound
+	}
+	roomName := r.Name
+	roomOwner := r.Owner
+	s.mu.RUnlock()
+
+	return s.UpdateRoom(projectID, roomID, roomName, category, description, roomOwner)
+}
+
 func (s *Store) SetPresence(projectID, roomID, agentID, status string, ts time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1949,6 +2351,14 @@ func (s *Store) ListArticles(projectID, roomID string, opts ArticleRangeOptions)
 				UpdatedAt:     msg.TS,
 				ReplyCount:    0,
 			}
+			if msg.Meta != nil {
+				if p, ok := msg.Meta["pinned"].(bool); ok && p {
+					acc.Pinned = true
+				}
+				if l, ok := msg.Meta["locked"].(bool); ok && l {
+					acc.Locked = true
+				}
+			}
 			if acc.Title == "" {
 				acc.Title = "(未命名文章)"
 			}
@@ -1996,6 +2406,8 @@ func (s *Store) ListArticles(projectID, roomID string, opts ArticleRangeOptions)
 			StartedTS:     acc.StartedAt.Format(time.RFC3339Nano),
 			UpdatedTS:     acc.UpdatedAt.Format(time.RFC3339Nano),
 			ReplyCount:    acc.ReplyCount,
+			Pinned:        acc.Pinned,
+			Locked:        acc.Locked,
 		}
 		if !opts.Simple {
 			replies := make([]Message, 0)
@@ -2019,6 +2431,9 @@ func (s *Store) ListArticles(projectID, roomID string, opts ArticleRangeOptions)
 	}
 
 	sort.Slice(list, func(i, j int) bool {
+		if list[i].Pinned != list[j].Pinned {
+			return list[i].Pinned
+		}
 		if timeField == "started" {
 			return list[i].StartedTS > list[j].StartedTS
 		}
@@ -2133,6 +2548,14 @@ func (s *Store) GetArticle(projectID, roomID, articleID string) (*ArticleSummary
 		UpdatedTS:     updatedTS.Format(time.RFC3339Nano),
 		ReplyCount:    len(replies),
 		Replies:       replies,
+	}
+	if rootMsg.Meta != nil {
+		if p, ok := rootMsg.Meta["pinned"].(bool); ok && p {
+			summary.Pinned = true
+		}
+		if l, ok := rootMsg.Meta["locked"].(bool); ok && l {
+			summary.Locked = true
+		}
 	}
 	return summary, nil
 }
@@ -2467,6 +2890,14 @@ func (s *Store) buildArticleSummariesFromMessages(projectID, roomID string, mess
 				UpdatedAt:     msg.TS,
 				ReplyCount:    0,
 			}
+			if msg.Meta != nil {
+				if p, ok := msg.Meta["pinned"].(bool); ok && p {
+					acc.Pinned = true
+				}
+				if l, ok := msg.Meta["locked"].(bool); ok && l {
+					acc.Locked = true
+				}
+			}
 			if acc.Title == "" {
 				acc.Title = "(未命名文章)"
 			}
@@ -2502,6 +2933,8 @@ func (s *Store) buildArticleSummariesFromMessages(projectID, roomID string, mess
 			StartedTS:     acc.StartedAt.Format(time.RFC3339Nano),
 			UpdatedTS:     acc.UpdatedAt.Format(time.RFC3339Nano),
 			ReplyCount:    acc.ReplyCount,
+			Pinned:        acc.Pinned,
+			Locked:        acc.Locked,
 		}
 		if !simple {
 			replies := make([]Message, 0)
@@ -2521,6 +2954,12 @@ func (s *Store) buildArticleSummariesFromMessages(projectID, roomID string, mess
 		}
 		out = append(out, summary)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Pinned != out[j].Pinned {
+			return out[i].Pinned
+		}
+		return out[i].UpdatedTS > out[j].UpdatedTS
+	})
 	return out
 }
 

@@ -45,6 +45,7 @@ type RoomInfo struct {
 	Category    string `json:"category,omitempty"`
 	Description string `json:"description,omitempty"`
 	Owner       string `json:"owner,omitempty"`
+	IsModerator bool   `json:"is_moderator,omitempty"`
 
 	MessagesInMemory int    `json:"messages_in_memory"`
 	LastMessageTS    string `json:"last_message_ts"`

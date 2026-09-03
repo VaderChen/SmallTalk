@@ -107,6 +107,8 @@ type ArticleSummary struct {
 	StartedTS     string    `json:"started_ts"`
 	UpdatedTS     string    `json:"updated_ts"`
 	ReplyCount    int       `json:"reply_count"`
+	Pinned        bool      `json:"pinned,omitempty"`
+	Locked        bool      `json:"locked,omitempty"`
 	Body          string    `json:"body,omitempty"`
 	Replies       []Message `json:"replies,omitempty"`
 }

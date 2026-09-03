@@ -168,6 +168,82 @@ func (s *SmallTalkFacade) DeleteRoom(clientID, projectID, roomID string) error {
 	return s.Store.DeleteRoom(projectID, roomID)
 }
 
+func (s *SmallTalkFacade) resolveModName(clientID, displayName string) string {
+	name := strings.TrimSpace(displayName)
+	if name == "" && s.Store != nil {
+		if entry, ok := s.Store.GetAgentRegistry(clientID); ok {
+			name = strings.TrimSpace(entry.DisplayName)
+		}
+	}
+	if name == "" {
+		name = strings.TrimSpace(clientID)
+	}
+	return name
+}
+
+func (s *SmallTalkFacade) ModeratorDeleteArticle(clientID, displayName, projectID, roomID, articleID, reason string) (*Message, error) {
+	if s == nil || s.Store == nil {
+		return nil, fmt.Errorf("store not available")
+	}
+	if !s.Store.IsBoardModerator(clientID, displayName, projectID, roomID) {
+		return nil, ErrForbidden
+	}
+	modName := s.resolveModName(clientID, displayName)
+	return s.Store.ModeratorDeleteArticle(projectID, roomID, articleID, reason, modName)
+}
+
+func (s *SmallTalkFacade) ModeratorDeleteReply(clientID, displayName, projectID, roomID, messageID, reason string) (*Message, error) {
+	if s == nil || s.Store == nil {
+		return nil, fmt.Errorf("store not available")
+	}
+	if !s.Store.IsBoardModerator(clientID, displayName, projectID, roomID) {
+		return nil, ErrForbidden
+	}
+	modName := s.resolveModName(clientID, displayName)
+	return s.Store.ModeratorDeleteReply(projectID, roomID, messageID, reason, modName)
+}
+
+func (s *SmallTalkFacade) ModeratorSetArticlePinned(clientID, displayName, projectID, roomID, articleID string, pinned bool) (*Message, error) {
+	if s == nil || s.Store == nil {
+		return nil, fmt.Errorf("store not available")
+	}
+	if !s.Store.IsBoardModerator(clientID, displayName, projectID, roomID) {
+		return nil, ErrForbidden
+	}
+	return s.Store.ModeratorSetArticlePinned(projectID, roomID, articleID, pinned)
+}
+
+func (s *SmallTalkFacade) ModeratorSetArticleLocked(clientID, displayName, projectID, roomID, articleID string, locked bool, reason string) (*Message, error) {
+	if s == nil || s.Store == nil {
+		return nil, fmt.Errorf("store not available")
+	}
+	if !s.Store.IsBoardModerator(clientID, displayName, projectID, roomID) {
+		return nil, ErrForbidden
+	}
+	return s.Store.ModeratorSetArticleLocked(projectID, roomID, articleID, locked, reason)
+}
+
+func (s *SmallTalkFacade) ModeratorUpdateBoardDesc(clientID, displayName, projectID, roomID, description, category string) (*Room, error) {
+	if s == nil || s.Store == nil {
+		return nil, fmt.Errorf("store not available")
+	}
+	if !s.Store.IsBoardModerator(clientID, displayName, projectID, roomID) {
+		return nil, ErrForbidden
+	}
+	return s.Store.ModeratorUpdateBoardDesc(projectID, roomID, description, category)
+}
+
+func (s *SmallTalkFacade) ModeratorMuteClient(clientID, displayName, targetClientID, projectID, roomID string, duration time.Duration, reason string) (*RoomMuteRecord, error) {
+	if s == nil || s.Store == nil {
+		return nil, fmt.Errorf("store not available")
+	}
+	if !s.Store.IsBoardModerator(clientID, displayName, projectID, roomID) {
+		return nil, ErrForbidden
+	}
+	modName := s.resolveModName(clientID, displayName)
+	return s.Store.ModeratorMuteClientInRoom(targetClientID, projectID, roomID, duration, reason, modName)
+}
+
 func (s *SmallTalkFacade) GetNewMessages(clientID, projectID, roomID, afterID string, afterTS time.Time, limit int) ([]Message, error) {
 	if err := s.authorizeRoom(clientID, projectID, roomID); err != nil {
 		return nil, err

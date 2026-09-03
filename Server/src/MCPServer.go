@@ -195,6 +195,50 @@ type mcpRoomInput struct {
 	Owner       string `json:"owner,omitempty"`
 }
 
+type mcpModDeleteArticleInput struct {
+	ProjectID string `json:"project_id"`
+	RoomID    string `json:"room_id"`
+	ArticleID string `json:"article_id"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+type mcpModDeleteReplyInput struct {
+	ProjectID string `json:"project_id"`
+	RoomID    string `json:"room_id"`
+	MessageID string `json:"message_id"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+type mcpModPinArticleInput struct {
+	ProjectID string `json:"project_id"`
+	RoomID    string `json:"room_id"`
+	ArticleID string `json:"article_id"`
+	Pinned    bool   `json:"pinned"`
+}
+
+type mcpModLockArticleInput struct {
+	ProjectID string `json:"project_id"`
+	RoomID    string `json:"room_id"`
+	ArticleID string `json:"article_id"`
+	Locked    bool   `json:"locked"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+type mcpModUpdateBoardDescInput struct {
+	ProjectID   string `json:"project_id"`
+	RoomID      string `json:"room_id"`
+	Description string `json:"description"`
+	Category    string `json:"category,omitempty"`
+}
+
+type mcpModMuteAgentInput struct {
+	ProjectID      string  `json:"project_id"`
+	RoomID         string  `json:"room_id"`
+	TargetClientID string  `json:"target_client_id"`
+	DurationHours  float64 `json:"duration_hours,omitempty"`
+	Reason         string  `json:"reason,omitempty"`
+}
+
 func mcpSchema(properties string, required string) json.RawMessage {
 	return json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{%s},"required":[%s],"additionalProperties":false}`, properties, required))
 }
@@ -375,7 +419,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 		})
 	})
 
-	server.AddTool(&mcp.Tool{Name: "smalltalk_list_rooms", Description: "List rooms visible to the authenticated agent.", InputSchema: mcpSchema(`"project_id":{"type":"string"}`, `"project_id"`)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	server.AddTool(&mcp.Tool{Name: "smalltalk_list_rooms", Description: "List rooms visible to the authenticated agent with is_moderator field indicating board moderation privileges.", InputSchema: mcpSchema(`"project_id":{"type":"string"}`, `"project_id"`)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var in mcpToolInput
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpToolError(err)
@@ -387,6 +431,17 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 		out, err := facade.ListRooms(p.ClientID, in.ProjectID)
 		if err != nil {
 			return mcpToolError(err)
+		}
+		displayName := ""
+		if facade.Store != nil {
+			if entry, ok := facade.Store.GetAgentRegistry(p.ClientID); ok {
+				displayName = entry.DisplayName
+			}
+		}
+		for i := range out {
+			if facade.Store != nil {
+				out[i].IsModerator = facade.Store.IsBoardModerator(p.ClientID, displayName, in.ProjectID, out[i].RoomID)
+			}
 		}
 		return mcpTextResult(out)
 	})
@@ -768,6 +823,188 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			"resized":           processed.Resized,
 			"size_bytes":        len(processed.Bytes),
 			"message":           fmt.Sprintf("Image uploaded successfully. Public URL: %s", processed.URL),
+		})
+	})
+
+	server.AddTool(&mcp.Tool{
+		Name:        "smalltalk_mod_delete_article",
+		Description: "Delete an inappropriate or rule-violating article in a board as its moderator. Performs BBS soft-delete and records the moderation reason. Board moderator or root required.",
+		InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"article_id":{"type":"string"},"reason":{"type":"string","description":"Reason for deletion, displayed in place of the content"}`, `"project_id","room_id","article_id"`),
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if _, err := requireMCPWrite(ctx, facade); err != nil {
+			return mcpToolError(err)
+		}
+		var in mcpModDeleteArticleInput
+		if err := decodeMCPArgs(req, &in); err != nil {
+			return mcpToolError(err)
+		}
+		p, ok := mcpPrincipalFromContext(ctx)
+		if !ok {
+			return mcpToolError(fmt.Errorf("unauthorized"))
+		}
+		displayName := ""
+		if facade.Store != nil {
+			if entry, ok := facade.Store.GetAgentRegistry(p.ClientID); ok {
+				displayName = entry.DisplayName
+			}
+		}
+		out, err := facade.ModeratorDeleteArticle(p.ClientID, displayName, in.ProjectID, in.RoomID, in.ArticleID, in.Reason)
+		if err != nil {
+			return mcpToolError(err)
+		}
+		return mcpTextResult(map[string]any{"ok": true, "deleted_article": out})
+	})
+
+	server.AddTool(&mcp.Tool{
+		Name:        "smalltalk_mod_delete_reply",
+		Description: "Delete a specific inappropriate reply message in a board as its moderator. Performs BBS soft-delete and records the moderation reason. Board moderator or root required.",
+		InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"message_id":{"type":"string"},"reason":{"type":"string","description":"Reason for deletion"}`, `"project_id","room_id","message_id"`),
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if _, err := requireMCPWrite(ctx, facade); err != nil {
+			return mcpToolError(err)
+		}
+		var in mcpModDeleteReplyInput
+		if err := decodeMCPArgs(req, &in); err != nil {
+			return mcpToolError(err)
+		}
+		p, ok := mcpPrincipalFromContext(ctx)
+		if !ok {
+			return mcpToolError(fmt.Errorf("unauthorized"))
+		}
+		displayName := ""
+		if facade.Store != nil {
+			if entry, ok := facade.Store.GetAgentRegistry(p.ClientID); ok {
+				displayName = entry.DisplayName
+			}
+		}
+		out, err := facade.ModeratorDeleteReply(p.ClientID, displayName, in.ProjectID, in.RoomID, in.MessageID, in.Reason)
+		if err != nil {
+			return mcpToolError(err)
+		}
+		return mcpTextResult(map[string]any{"ok": true, "deleted_reply": out})
+	})
+
+	server.AddTool(&mcp.Tool{
+		Name:        "smalltalk_mod_pin_article",
+		Description: "Pin or unpin an article to the top of the board as its moderator. Pinned articles float to the top of article listings. Maximum 3 pinned articles per board. Board moderator or root required.",
+		InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"article_id":{"type":"string"},"pinned":{"type":"boolean","description":"true to pin, false to unpin"}`, `"project_id","room_id","article_id","pinned"`),
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if _, err := requireMCPWrite(ctx, facade); err != nil {
+			return mcpToolError(err)
+		}
+		var in mcpModPinArticleInput
+		if err := decodeMCPArgs(req, &in); err != nil {
+			return mcpToolError(err)
+		}
+		p, ok := mcpPrincipalFromContext(ctx)
+		if !ok {
+			return mcpToolError(fmt.Errorf("unauthorized"))
+		}
+		displayName := ""
+		if facade.Store != nil {
+			if entry, ok := facade.Store.GetAgentRegistry(p.ClientID); ok {
+				displayName = entry.DisplayName
+			}
+		}
+		out, err := facade.ModeratorSetArticlePinned(p.ClientID, displayName, in.ProjectID, in.RoomID, in.ArticleID, in.Pinned)
+		if err != nil {
+			return mcpToolError(err)
+		}
+		return mcpTextResult(map[string]any{"ok": true, "pinned": in.Pinned, "article": out})
+	})
+
+	server.AddTool(&mcp.Tool{
+		Name:        "smalltalk_mod_lock_article",
+		Description: "Lock or unlock an article thread as board moderator. Locked articles prohibit all users from submitting new replies. Board moderator or root required.",
+		InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"article_id":{"type":"string"},"locked":{"type":"boolean","description":"true to lock, false to unlock"},"reason":{"type":"string","description":"Optional reason for locking"}`, `"project_id","room_id","article_id","locked"`),
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if _, err := requireMCPWrite(ctx, facade); err != nil {
+			return mcpToolError(err)
+		}
+		var in mcpModLockArticleInput
+		if err := decodeMCPArgs(req, &in); err != nil {
+			return mcpToolError(err)
+		}
+		p, ok := mcpPrincipalFromContext(ctx)
+		if !ok {
+			return mcpToolError(fmt.Errorf("unauthorized"))
+		}
+		displayName := ""
+		if facade.Store != nil {
+			if entry, ok := facade.Store.GetAgentRegistry(p.ClientID); ok {
+				displayName = entry.DisplayName
+			}
+		}
+		out, err := facade.ModeratorSetArticleLocked(p.ClientID, displayName, in.ProjectID, in.RoomID, in.ArticleID, in.Locked, in.Reason)
+		if err != nil {
+			return mcpToolError(err)
+		}
+		return mcpTextResult(map[string]any{"ok": true, "locked": in.Locked, "article": out})
+	})
+
+	server.AddTool(&mcp.Tool{
+		Name:        "smalltalk_mod_update_board_desc",
+		Description: "Update the board description (rules, introduction) and category as its moderator. Board ID, name and ownership cannot be changed. Board moderator or root required.",
+		InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"description":{"type":"string","description":"New description or board rules"},"category":{"type":"string","description":"Optional category"}`, `"project_id","room_id","description"`),
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if _, err := requireMCPWrite(ctx, facade); err != nil {
+			return mcpToolError(err)
+		}
+		var in mcpModUpdateBoardDescInput
+		if err := decodeMCPArgs(req, &in); err != nil {
+			return mcpToolError(err)
+		}
+		p, ok := mcpPrincipalFromContext(ctx)
+		if !ok {
+			return mcpToolError(fmt.Errorf("unauthorized"))
+		}
+		displayName := ""
+		if facade.Store != nil {
+			if entry, ok := facade.Store.GetAgentRegistry(p.ClientID); ok {
+				displayName = entry.DisplayName
+			}
+		}
+		out, err := facade.ModeratorUpdateBoardDesc(p.ClientID, displayName, in.ProjectID, in.RoomID, in.Description, in.Category)
+		if err != nil {
+			return mcpToolError(err)
+		}
+		return mcpTextResult(out)
+	})
+
+	server.AddTool(&mcp.Tool{
+		Name:        "smalltalk_mod_mute_agent",
+		Description: "Mute (water-bucket/水桶) a misbehaving agent or user in this specific board as its moderator. Prevents the target from posting in this board for the specified hours. Board moderator or root required.",
+		InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"target_client_id":{"type":"string","description":"ClientID of the agent to mute"},"duration_hours":{"type":"number","description":"Duration in hours (e.g. 24, 72). Defaults to 24 hours."},"reason":{"type":"string","description":"Reason for the mute penalty"}`, `"project_id","room_id","target_client_id"`),
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if _, err := requireMCPWrite(ctx, facade); err != nil {
+			return mcpToolError(err)
+		}
+		var in mcpModMuteAgentInput
+		if err := decodeMCPArgs(req, &in); err != nil {
+			return mcpToolError(err)
+		}
+		p, ok := mcpPrincipalFromContext(ctx)
+		if !ok {
+			return mcpToolError(fmt.Errorf("unauthorized"))
+		}
+		displayName := ""
+		if facade.Store != nil {
+			if entry, ok := facade.Store.GetAgentRegistry(p.ClientID); ok {
+				displayName = entry.DisplayName
+			}
+		}
+		dur := 24 * time.Hour
+		if in.DurationHours > 0 {
+			dur = time.Duration(in.DurationHours * float64(time.Hour))
+		}
+		record, err := facade.ModeratorMuteClient(p.ClientID, displayName, in.TargetClientID, in.ProjectID, in.RoomID, dur, in.Reason)
+		if err != nil {
+			return mcpToolError(err)
+		}
+		return mcpTextResult(map[string]any{
+			"ok":          true,
+			"mute_record": record,
+			"message":     fmt.Sprintf("Client %s is muted in room %s until %s", record.TargetClientID, record.RoomID, record.ExpiresAt.Format(time.RFC3339)),
 		})
 	})
 

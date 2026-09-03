@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -34,6 +35,15 @@ type UpdateClientACLRequest struct {
 type aclDiskEntry struct {
 	AllowRooms []RoomRef `json:"allow_rooms"`
 	DenyRooms  []RoomRef `json:"deny_rooms"`
+}
+
+type RoomMuteRecord struct {
+	TargetClientID string    `json:"target_client_id"`
+	ProjectID      string    `json:"project_id"`
+	RoomID         string    `json:"room_id"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	Reason         string    `json:"reason"`
+	Moderator      string    `json:"moderator"`
 }
 
 func (s *Store) aclPath() string {
@@ -264,3 +274,68 @@ func (s *Store) ListAllRoomsForClient(clientID string, now time.Time) []RoomInfo
 	}
 	return out
 }
+
+func (s *Store) IsClientMutedInRoom(clientID, projectID, roomID string) (bool, string) {
+	if s == nil {
+		return false, ""
+	}
+	clientID = strings.TrimSpace(clientID)
+	projectID = strings.TrimSpace(projectID)
+	roomID = strings.TrimSpace(roomID)
+	if clientID == "" || projectID == "" || roomID == "" {
+		return false, ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.roomMutes == nil {
+		return false, ""
+	}
+	key := clientID + ":" + projectID + ":" + roomID
+	mute, ok := s.roomMutes[key]
+	if !ok || mute == nil {
+		return false, ""
+	}
+	if time.Now().Before(mute.ExpiresAt) {
+		reason := mute.Reason
+		if reason == "" {
+			reason = "violation of board rules"
+		}
+		return true, fmt.Sprintf("you are muted in this board by moderator %s until %s (reason: %s)", mute.Moderator, mute.ExpiresAt.Format(time.RFC3339), reason)
+	}
+	return false, ""
+}
+
+func (s *Store) ModeratorMuteClientInRoom(targetClientID, projectID, roomID string, duration time.Duration, reason, modName string) (*RoomMuteRecord, error) {
+	if s == nil {
+		return nil, fmt.Errorf("store not available")
+	}
+	targetClientID = strings.TrimSpace(targetClientID)
+	projectID = strings.TrimSpace(projectID)
+	roomID = strings.TrimSpace(roomID)
+	if targetClientID == "" {
+		return nil, ErrMissingClientID
+	}
+	if strings.EqualFold(targetClientID, "root") {
+		return nil, fmt.Errorf("cannot mute root administrator")
+	}
+	if duration <= 0 {
+		duration = 24 * time.Hour
+	}
+	record := &RoomMuteRecord{
+		TargetClientID: targetClientID,
+		ProjectID:      projectID,
+		RoomID:         roomID,
+		ExpiresAt:      time.Now().Add(duration),
+		Reason:         strings.TrimSpace(reason),
+		Moderator:      strings.TrimSpace(modName),
+	}
+	key := targetClientID + ":" + projectID + ":" + roomID
+	s.mu.Lock()
+	if s.roomMutes == nil {
+		s.roomMutes = make(map[string]*RoomMuteRecord)
+	}
+	s.roomMutes[key] = record
+	s.mu.Unlock()
+	return record, nil
+}
+
