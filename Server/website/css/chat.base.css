@@ -151,7 +151,7 @@
 
     .threadHead,
     .threadRow {
-      grid-template-columns: 22px 64px 116px 160px minmax(0, 1fr) 72px 64px;
+      grid-template-columns: 22px 64px 116px 176px minmax(0, 1fr) 72px 64px;
     }
 
     .threadHead > :nth-child(4),
@@ -161,7 +161,7 @@
 
     .threadHead > :nth-child(5),
     .threadRow > :nth-child(5) {
-      padding-left: 14px;
+      padding-left: 16px;
     }
 
     .boardName,
@@ -174,14 +174,20 @@
       min-width: 0;
     }
 
-    .boardName,
-    .threadAuthor {
+    .boardName {
       color: var(--white);
       font-weight: 700;
       overflow: hidden;
       text-overflow: clip;
       white-space: nowrap;
       padding-right: 8px;
+    }
+
+    .threadAuthor {
+      color: var(--white);
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: visible;
     }
 
     .authorUser {

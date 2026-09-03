@@ -179,7 +179,7 @@
       return 1;
     }
 
-    function truncateAuthorByWidth(str, maxWidth = 16) {
+    function truncateAuthorByWidth(str, maxWidth = 15) {
       if (!str) return "";
       let width = 0;
       let result = "";
@@ -195,7 +195,7 @@
           result += segment;
           width += segWidth;
         }
-        return result;
+        return result.trimEnd();
       }
       for (const ch of Array.from(str)) {
         const w = charDisplayWidth(ch);
@@ -203,7 +203,7 @@
         result += ch;
         width += w;
       }
-      return result;
+      return result.trimEnd();
     }
 
     function authorHTML(author, maxCols) {
