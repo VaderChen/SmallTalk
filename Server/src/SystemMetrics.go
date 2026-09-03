@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -59,6 +60,7 @@ type SystemMetricsCollector struct {
 	lastNetRx    uint64
 	lastNetTx    uint64
 	lastNetTime  time.Time
+	hasNetPrev   bool
 	minuteBuffer []RawSample
 	rawCountDay  int
 	currentDay   string
@@ -169,22 +171,26 @@ func (c *SystemMetricsCollector) sampleOnce() RawSample {
 		s.RAMTotal = vmem.Total
 	}
 
-	// 3. Disk
-	rootPath := "/"
-	if os.PathSeparator == '\\' {
-		rootPath = "C:\\"
-	}
-	if dusage, err := disk.Usage(rootPath); err == nil && dusage != nil {
+	// 3. Disk (Cross-OS dynamic volume resolution for Windows, macOS, Linux)
+	targetDisk := resolveDiskMount(c.dataDir)
+	if dusage, err := disk.Usage(targetDisk); err == nil && dusage != nil {
 		s.DiskPct = math.Round(dusage.UsedPercent*10) / 10
 		s.DiskUsed = dusage.Used
 		s.DiskTotal = dusage.Total
+	} else if runtime.GOOS == "windows" && targetDisk != `C:\` {
+		// Fallback to C:\ if custom drive path is not supported by API
+		if dusageFallback, errFallback := disk.Usage(`C:\`); errFallback == nil && dusageFallback != nil {
+			s.DiskPct = math.Round(dusageFallback.UsedPercent*10) / 10
+			s.DiskUsed = dusageFallback.Used
+			s.DiskTotal = dusageFallback.Total
+		}
 	}
 
-	// 4. Net IO
+	// 4. Net IO (Aggregate NIC counters across all platforms)
 	if netIO, err := net.IOCounters(false); err == nil && len(netIO) > 0 {
 		currRx := netIO[0].BytesRecv
 		currTx := netIO[0].BytesSent
-		if !c.lastNetTime.IsZero() && c.lastNetRx > 0 {
+		if !c.lastNetTime.IsZero() && c.hasNetPrev {
 			dt := now.Sub(c.lastNetTime).Seconds()
 			if dt > 0 && currRx >= c.lastNetRx && currTx >= c.lastNetTx {
 				s.NetRxBps = float64(currRx-c.lastNetRx) / dt
@@ -194,6 +200,7 @@ func (c *SystemMetricsCollector) sampleOnce() RawSample {
 		c.lastNetRx = currRx
 		c.lastNetTx = currTx
 		c.lastNetTime = now
+		c.hasNetPrev = true
 	}
 
 	c.mu.Lock()
@@ -333,6 +340,22 @@ func (c *SystemMetricsCollector) pruneOldFiles(days int) {
 			}
 		}
 	}
+}
+
+func resolveDiskMount(dataDir string) string {
+	if runtime.GOOS == "windows" {
+		if abs, err := filepath.Abs(dataDir); err == nil {
+			vol := filepath.VolumeName(abs)
+			if vol != "" {
+				return vol + `\`
+			}
+		}
+		if drive := os.Getenv("SystemDrive"); drive != "" {
+			return drive + `\`
+		}
+		return `C:\`
+	}
+	return "/"
 }
 
 func formatBytesRate(bps float64) string {

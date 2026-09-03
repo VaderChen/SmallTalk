@@ -1,4 +1,6 @@
 # Build output & binaries
+/dist/
+dist/
 Server/dist/
 Server/SmallTalkServer
 Server/SmallTalkServer_*
