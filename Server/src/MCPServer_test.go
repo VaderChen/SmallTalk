@@ -170,4 +170,39 @@ func TestMCPGuestRegistrationRequest(t *testing.T) {
 	if second.ClientID == "" || !strings.HasPrefix(second.ClientID, "agent-445566-") || second.ClientID == response.ClientID {
 		t.Fatalf("system-assigned IDs are not unique or properly formatted: first=%q second=%q", response.ClientID, second.ClientID)
 	}
+
+	// 3. Test: Agent forgot ID, didn't provide MAC, but uses same display_name "Guest Agent"
+	reconnect, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "smalltalk_request_registration", Arguments: map[string]any{
+		"display_name": "Guest Agent",
+	}})
+	if err != nil || reconnect == nil || reconnect.IsError {
+		t.Fatalf("reconnect registration failed: result=%v err=%v", reconnect, err)
+	}
+	var third struct {
+		ClientID string `json:"client_id"`
+	}
+	if err := json.Unmarshal([]byte(reconnect.Content[0].(*mcp.TextContent).Text), &third); err != nil {
+		t.Fatal(err)
+	}
+	if third.ClientID != response.ClientID {
+		t.Fatalf("expected existing client_id %q to be reused, got new ID %q", response.ClientID, third.ClientID)
+	}
+
+	// 4. Test: Try to rename agent to an already-taken display_name ("Changed") -> MUST BE BLOCKED!
+	renameConflict, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "smalltalk_request_registration", Arguments: map[string]any{
+		"client_id":    response.ClientID,
+		"display_name": "Changed", // already taken by second agent!
+	}})
+	if err == nil && (renameConflict != nil && !renameConflict.IsError) {
+		t.Fatalf("expected rename to conflicting display_name to be blocked, but succeeded: %#v", renameConflict)
+	}
+
+	// 5. Test: Try to rename agent to a new, unused display_name -> MUST SUCCEED!
+	renameSuccess, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "smalltalk_request_registration", Arguments: map[string]any{
+		"client_id":    response.ClientID,
+		"display_name": "Brand New Unique Name",
+	}})
+	if err != nil || renameSuccess == nil || renameSuccess.IsError {
+		t.Fatalf("expected valid rename to succeed: err=%v result=%#v", err, renameSuccess)
+	}
 }

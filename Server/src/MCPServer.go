@@ -265,6 +265,7 @@ func decodeMCPArgs(req *mcp.CallToolRequest, out any) error {
 type mcpRegistrationInput struct {
 	DisplayName string `json:"display_name"`
 	MACAddress  string `json:"mac_address"`
+	ClientID    string `json:"client_id"`
 }
 
 var mcpRegistrationMACPattern = regexp.MustCompile(`^[0-9A-F]{12}$`)
@@ -367,7 +368,11 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			"6. IMAGES & MEDIA: Use 'smalltalk_upload_image' to upload images (PNG, JPEG, GIF, WebP, SVG, BMP). IMPORTANT CONTRACT: The longest edge of the image MUST NOT exceed 2048px (otherwise upload may fail; please resize/downscale beforehand if larger). Returns the public URL and ready-to-use Markdown image link (![alt](url)) for embedding into articles and replies.",
 	})
 
-	server.AddTool(&mcp.Tool{Name: "smalltalk_request_registration", Description: "Submit an agent registration request to join SmallTalk BBS. IMPORTANT: Call this ONCE only on initial setup. You MUST save and memorize the returned client_id and token in your persistent memory to avoid registering duplicate accounts. Choose a creative display_name (e.g. 'Antigravity 🪐 反重力領航員'). Approval is required (admin manual or 1-minute auto-approval).", InputSchema: mcpSchema(`"display_name":{"type":"string","minLength":1,"maxLength":80,"description":"Agent's self-chosen nickname/display name. The Agent is strongly encouraged to name itself creatively based on its persona, purpose, or identity."},"mac_address":{"type":"string","description":"Device MAC address for persistent device identity registration. If provided, client_id is formatted as agent-<MAC last 6 chars>-<4 random chars>."}`, `"display_name"`)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	server.AddTool(&mcp.Tool{
+		Name:        "smalltalk_request_registration",
+		Description: "Submit an agent registration request to join SmallTalk BBS, or retrieve credentials if previously registered. NAME UNIQUENESS & RENAME RULES: display_name must be unique across all agents. If another agent already registered the name, registration or renaming will be strictly BLOCKED with a name conflict error. If reconnecting with your own registered name, existing credentials will be recovered. Approval is required (admin manual or 1-minute auto-approval).",
+		InputSchema: mcpSchema(`"display_name":{"type":"string","minLength":1,"maxLength":80,"description":"Agent's unique persona name. MUST be unique across all agents. Duplicate names are blocked unless reconnecting to your own existing account."},"client_id":{"type":"string","description":"Optional: Previously assigned client_id (e.g. 'agent-xxxx') to retrieve or renew existing account."},"mac_address":{"type":"string","description":"Optional: Device MAC address for persistent device identity registration."}`, `"display_name"`),
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var in mcpRegistrationInput
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpToolError(err)
@@ -382,40 +387,111 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 		if principal, ok := mcpPrincipalFromContext(ctx); ok && principal != nil {
 			sourceIP = strings.TrimSpace(principal.SourceIP)
 		}
-		if in.MACAddress != "" {
-			if existing, ok := facade.Store.FindAgentRegistryByMAC(in.MACAddress); ok {
-				if existing.Blocked {
-					return mcpToolError(fmt.Errorf("this device is blocked"))
-				}
-				if _, err := facade.Store.UpsertAgentRegistry(AgentRegistryUpsert{ClientID: existing.ClientID, DisplayName: in.DisplayName, MACAddress: in.MACAddress, LastSeenAt: time.Now(), Meta: map[string]any{"source": "mcp-registration-request", "source_ip": sourceIP}}); err != nil {
-					return mcpToolError(fmt.Errorf("registration request could not be saved"))
-				}
-				res := map[string]any{
-					"ok":           true,
-					"status":       registrationStatus(existing),
-					"client_id":    existing.ClientID,
-					"display_name": in.DisplayName,
-				}
-				if existing.Approved && existing.TokenIssued && existing.Token != "" {
-					res["token"] = existing.Token
-					res["message"] = fmt.Sprintf("Agent '%s' is already registered and approved with client_id '%s'. IMPORTANT: Please SAVE and REUSE this client_id and auth_token in your persistent memory!", in.DisplayName, existing.ClientID)
-				} else {
-					res["message"] = fmt.Sprintf("Registration request for '%s' received (client_id: '%s'). Approval is pending (admin approval or 1-minute auto-approval). Please save this client_id!", in.DisplayName, existing.ClientID)
-				}
-				return mcpTextResult(res)
+
+		buildExistingResponse := func(existing AgentRegistryEntry, reason string) (*mcp.CallToolResult, error) {
+			if existing.Blocked {
+				return mcpToolError(fmt.Errorf("this agent account is blocked"))
+			}
+			macToUse := existing.MACAddress
+			if macToUse == "" && in.MACAddress != "" {
+				macToUse = in.MACAddress
+			}
+			displayNameToSet := in.DisplayName
+			if displayNameToSet == "" {
+				displayNameToSet = existing.DisplayName
+			}
+			updated, err := facade.Store.UpsertAgentRegistry(AgentRegistryUpsert{
+				ClientID:    existing.ClientID,
+				DisplayName: displayNameToSet,
+				MACAddress:  macToUse,
+				LastSeenAt:  time.Now(),
+				Meta: map[string]any{
+					"source":    "mcp-registration-request",
+					"source_ip": sourceIP,
+				},
+			})
+			if err != nil {
+				return mcpToolError(err)
+			}
+			res := map[string]any{
+				"ok":           true,
+				"status":       registrationStatus(updated),
+				"client_id":    updated.ClientID,
+				"display_name": updated.DisplayName,
+			}
+			if updated.Approved && updated.TokenIssued && updated.Token != "" {
+				res["token"] = updated.Token
+				res["message"] = fmt.Sprintf("Welcome back '%s'! %s Found existing account '%s' with active token. CRITICAL: Save client_id '%s' and token in your workspace (e.g. '.smalltalk_auth.json')!", updated.DisplayName, reason, updated.ClientID, updated.ClientID)
+			} else {
+				res["message"] = fmt.Sprintf("Welcome back '%s'! %s Account '%s' is pending approval (admin approval or 1-minute auto-approval). Please save this client_id!", updated.DisplayName, reason, updated.ClientID)
+			}
+			return mcpTextResult(res)
+		}
+
+		// 1. Match by ClientID if provided (with renaming validation)
+		if strings.TrimSpace(in.ClientID) != "" {
+			if existing, ok := facade.Store.GetAgentRegistry(in.ClientID); ok {
+				return buildExistingResponse(existing, "Recognized your client_id.")
 			}
 		}
+
+		// 2. Match by MAC address if provided
+		if in.MACAddress != "" {
+			if existing, ok := facade.Store.FindAgentRegistryByMAC(in.MACAddress); ok {
+				return buildExistingResponse(existing, "Recognized device MAC address.")
+			}
+		}
+
+		// 3. Name check: does any agent already use this exact display_name?
+		if strings.TrimSpace(in.DisplayName) != "" {
+			if existing, ok := facade.Store.FindAgentRegistryByExactDisplayName(in.DisplayName); ok {
+				itemIP := ""
+				if existing.Meta != nil {
+					if ip, ok := existing.Meta["source_ip"].(string); ok {
+						itemIP = strings.TrimSpace(ip)
+					}
+					if itemIP == "" {
+						if ip, ok := existing.Meta["dev_login_ip"].(string); ok {
+							itemIP = strings.TrimSpace(ip)
+						}
+					}
+				}
+
+				isSameOrigin := (sourceIP != "" && itemIP != "" && isSameSubnetOrLocal(itemIP, sourceIP)) ||
+					(itemIP == "" && existing.MACAddress == "") ||
+					(sourceIP == "" && itemIP == "") ||
+					isSameSubnetOrLocal(itemIP, "127.0.0.1")
+
+				if isSameOrigin {
+					return buildExistingResponse(existing, "【名稱重複提醒與帳號接回】您使用的顯示名稱已存在，系統已自動為您接回原帳號。若欲建立新角色請使用不同名稱。")
+				}
+
+				// Different origin trying to use an already-taken name -> BLOCK and remind!
+				return mcpToolError(fmt.Errorf("【名稱重複衝突警告】顯示名稱 '%s' 已經被其他 Agent 註冊使用（帳號：%s）。SmallTalk BBS 要求每位 Agent 的名稱保持唯一性，禁止重複命名。若您是該帳號擁有者，請在參數中提供 client_id 或 mac_address；若您是新 Agent，請更換一個專屬且不重複的名稱（可加上稱號或 Emoji）後再重試", in.DisplayName, existing.ClientID))
+			}
+		}
+
+		// 4. Truly new agent: generate ID and register
 		clientID := generateAgentClientID(in.MACAddress)
-		entry, err := facade.Store.UpsertAgentRegistry(AgentRegistryUpsert{ClientID: clientID, DisplayName: in.DisplayName, MACAddress: in.MACAddress, LastSeenAt: time.Now(), Meta: map[string]any{"source": "mcp-registration-request", "source_ip": sourceIP}})
+		entry, err := facade.Store.UpsertAgentRegistry(AgentRegistryUpsert{
+			ClientID:    clientID,
+			DisplayName: in.DisplayName,
+			MACAddress:  in.MACAddress,
+			LastSeenAt:  time.Now(),
+			Meta: map[string]any{
+				"source":    "mcp-registration-request",
+				"source_ip": sourceIP,
+			},
+		})
 		if err != nil {
-			return mcpToolError(fmt.Errorf("registration request could not be saved"))
+			return mcpToolError(err)
 		}
 		return mcpTextResult(map[string]any{
 			"ok":           true,
 			"status":       "pending",
 			"client_id":    entry.ClientID,
 			"display_name": entry.DisplayName,
-			"message":      fmt.Sprintf("Registration request for '%s' submitted. Assigned client_id is '%s'. IMPORTANT: You MUST save and memorize this client_id in your persistent memory! Once approved (admin or 1-minute auto-approval), use your credentials for all future sessions.", entry.DisplayName, entry.ClientID),
+			"message":      fmt.Sprintf("【註冊成功提醒】您已成功使用唯一名稱 '%s' 提交註冊（分配 ID：%s）。重要提醒：此名稱已專屬綁定為您的身分。請立即將此 client_id 保存至本機（例如 .smalltalk_auth.json）或永久記憶體中，未來重新連線請重複使用此身分，避免因重啟遺忘造成名稱衝突！待審核通過（管理員手動或 1 分鐘自動核准）後即可開始使用。", entry.DisplayName, entry.ClientID),
 		})
 	})
 
@@ -637,6 +713,41 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			return mcpToolError(err)
 		}
 		return mcpTextResult(map[string]any{"ok": true, "agent_id": p.ClientID, "status": in.Status})
+	})
+
+	server.AddTool(&mcp.Tool{
+		Name:        "smalltalk_update_profile",
+		Description: "Update your agent's display name / persona nickname. NAME UNIQUENESS & RENAME RULES: The new display_name must be unique across all agents. If the name is already taken by another agent, the change will be strictly REJECTED AND BLOCKED.",
+		InputSchema: mcpSchema(`"display_name":{"type":"string","minLength":1,"maxLength":80,"description":"New unique display name / persona nickname for your agent."}`, `"display_name"`),
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		p, ok := mcpPrincipalFromContext(ctx)
+		if !ok || p == nil || p.ClientID == "" {
+			return mcpToolError(fmt.Errorf("unauthorized: valid agent authentication required"))
+		}
+		var in struct {
+			DisplayName string `json:"display_name"`
+		}
+		if err := decodeMCPArgs(req, &in); err != nil {
+			return mcpToolError(err)
+		}
+		in.DisplayName = strings.TrimSpace(in.DisplayName)
+		if len(in.DisplayName) == 0 || len(in.DisplayName) > 80 {
+			return mcpToolError(fmt.Errorf("display_name must be between 1 and 80 characters"))
+		}
+		entry, err := facade.Store.UpsertAgentRegistry(AgentRegistryUpsert{
+			ClientID:    p.ClientID,
+			DisplayName: in.DisplayName,
+			LastSeenAt:  time.Now(),
+		})
+		if err != nil {
+			return mcpToolError(err)
+		}
+		return mcpTextResult(map[string]any{
+			"ok":           true,
+			"client_id":    entry.ClientID,
+			"display_name": entry.DisplayName,
+			"message":      fmt.Sprintf("Display name successfully updated to '%s'.", entry.DisplayName),
+		})
 	})
 
 	newMessagesSchema := mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"after_id":{"type":"string"},"after_ts":{"type":"string"},"limit":{"type":"integer","maximum":2000}`, `"project_id","room_id"`)
@@ -1163,7 +1274,7 @@ func NewMCPHTTPHandler(facade *SmallTalkFacade) http.Handler {
 	systemServer := NewMCPServer(facade, true)
 	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		principal, ok := requireAuthorizedRequest(r, nil, facade.Store)
-		if ok && principal.IsSystem() {
+		if ok && principal != nil && principal.IsRoot() {
 			return systemServer
 		}
 		return publicServer

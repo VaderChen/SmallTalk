@@ -90,6 +90,10 @@ func RunService() {
 	if stop := StartAutoApprovalWorker(store); stop != nil {
 		cloud.stopWorkers = append(cloud.stopWorkers, stop)
 	}
+	metricsCollector := StartSystemMetricsCollector(dataDir)
+	cloud.stopWorkers = append(cloud.stopWorkers, func() {
+		metricsCollector.Stop()
+	})
 	authAPI := &HttpAPI_auth{
 		MarsCloudURL:    marsCloudURL,
 		DefaultAccount:  defaultAccount,
@@ -126,13 +130,18 @@ func RunService() {
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
-		if count, err := store.PruneVisitorMessages(15 * 24 * time.Hour); err == nil && count > 0 {
-			Tools.Log.Print(Tools.LL_Info, "Pruned %d expired messages from visitors room on startup", count)
-		}
-		for range ticker.C {
-			if count, err := store.PruneVisitorMessages(15 * 24 * time.Hour); err == nil && count > 0 {
-				Tools.Log.Print(Tools.LL_Info, "Pruned %d expired messages from visitors room", count)
+		pruneVisitors := func(reason string) {
+			if !store.VisitorTTLEnabled() {
+				return
 			}
+			ttl := store.VisitorTTL()
+			if count, err := store.PruneVisitorMessages(ttl); err == nil && count > 0 {
+				Tools.Log.Print(Tools.LL_Info, "Pruned %d expired messages from visitors room (%s, TTL: %v)", count, reason, ttl)
+			}
+		}
+		pruneVisitors("on startup")
+		for range ticker.C {
+			pruneVisitors("hourly cycle")
 		}
 	}()
 

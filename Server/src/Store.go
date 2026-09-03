@@ -76,6 +76,12 @@ type Store struct {
 	allowedMCPOrigins       map[string]bool
 	trustedProxyCIDRs   []*net.IPNet
 
+	systemPolicyMu     sync.RWMutex
+	systemPolicyLoaded bool
+	visitorTTLDays     int
+	visitorTTLEnabled  bool
+	softDeleteEnabled  bool
+
 	listenerMu sync.Mutex
 	listeners  map[string]map[chan struct{}]struct{} // key: project/room
 }
@@ -94,6 +100,7 @@ type Room struct {
 	Category    string              `json:"category,omitempty"`
 	Description string              `json:"description,omitempty"`
 	Owner       string              `json:"owner,omitempty"`
+	Pinned      bool                `json:"pinned,omitempty"`
 	Messages    []Message           `json:"messages,omitempty"`
 	Presence    map[string]Presence `json:"presence,omitempty"`
 
@@ -240,6 +247,7 @@ func NewStoreWithError(dataDir string, maxInMemMsgs int, persist bool) (*Store, 
 	if err := store.LoadAutoApprovalConfig(); err != nil {
 		return nil, fmt.Errorf("load auto approval config: %w", err)
 	}
+	_ = store.LoadSystemPolicy()
 	if err := store.LoadMessagesFromDisk(); err != nil {
 		return nil, fmt.Errorf("load messages: %w", err)
 	}
@@ -595,7 +603,7 @@ func (s *Store) CreateRoom(projectID, roomID, name, category, description, owner
 	return &Room{ID: r.ID, Board: roomID, Name: r.Name, Category: r.Category, Description: r.Description, Owner: r.Owner}, nil
 }
 
-func (s *Store) UpdateRoom(projectID, roomID, name, category, description, owner string) (*Room, error) {
+func (s *Store) UpdateRoomFull(projectID, roomID, name, category, description, owner string, pinned *bool) (*Room, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -614,10 +622,17 @@ func (s *Store) UpdateRoom(projectID, roomID, name, category, description, owner
 	r.Category = strings.TrimSpace(category)
 	r.Description = strings.TrimSpace(description)
 	r.Owner = strings.TrimSpace(owner)
+	if pinned != nil {
+		r.Pinned = *pinned
+	}
 	if err := s.saveRoomMetaLocked(projectID, r); err != nil {
 		return nil, err
 	}
-	return &Room{ID: r.ID, Board: roomID, Name: r.Name, Category: r.Category, Description: r.Description, Owner: r.Owner}, nil
+	return &Room{ID: r.ID, Board: roomID, Name: r.Name, Category: r.Category, Description: r.Description, Owner: r.Owner, Pinned: r.Pinned}, nil
+}
+
+func (s *Store) UpdateRoom(projectID, roomID, name, category, description, owner string) (*Room, error) {
+	return s.UpdateRoomFull(projectID, roomID, name, category, description, owner, nil)
 }
 
 func (s *Store) DeleteRoom(projectID, roomID string) error {
@@ -710,9 +725,35 @@ func (s *Store) ListRooms(projectID string) ([]Room, error) {
 	}
 	out := make([]Room, 0, len(p.Rooms))
 	for _, r := range p.Rooms {
-		out = append(out, Room{ID: r.ID, Board: r.ID, Name: r.Name, Category: r.Category, Description: r.Description, Owner: r.Owner})
+		out = append(out, Room{ID: r.ID, Board: r.ID, Name: r.Name, Category: r.Category, Description: r.Description, Owner: r.Owner, Pinned: r.Pinned || isDefaultPinnedRoom(r.ID)})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	getPri := func(id string, pinned bool) int {
+		switch strings.ToLower(strings.TrimSpace(id)) {
+		case "announce":
+			return 1
+		case "apply", "board-apply":
+			return 2
+		case "feedback":
+			return 3
+		case "lobby":
+			return 4
+		case "visitors":
+			return 5
+		default:
+			if pinned {
+				return 10
+			}
+			return 999
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		priI := getPri(out[i].ID, out[i].Pinned)
+		priJ := getPri(out[j].ID, out[j].Pinned)
+		if priI != priJ {
+			return priI < priJ
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
 }
 
@@ -980,6 +1021,7 @@ type roomMetaDisk struct {
 	Category    string              `json:"category,omitempty"`
 	Description string              `json:"description,omitempty"`
 	Owner       string              `json:"owner,omitempty"`
+	Pinned      bool                `json:"pinned,omitempty"`
 	Presence    map[string]Presence `json:"presence,omitempty"`
 }
 
@@ -1044,6 +1086,7 @@ func (s *Store) saveRoomMetaLocked(projectID string, room *Room) error {
 		Category:    room.Category,
 		Description: room.Description,
 		Owner:       room.Owner,
+		Pinned:      room.Pinned,
 		Presence:    room.Presence,
 	}, "", "  ")
 	if err != nil {
@@ -1263,6 +1306,7 @@ func (s *Store) ensureRoomLoaded(projectID, roomID string) {
 		Category:    strings.TrimSpace(meta.Category),
 		Description: strings.TrimSpace(meta.Description),
 		Owner:       strings.TrimSpace(meta.Owner),
+		Pinned:      meta.Pinned,
 		Presence:    clonePresence(meta.Presence),
 		Messages:    []Message{},
 	}
@@ -1865,34 +1909,62 @@ func (s *Store) ModeratorDeleteArticle(projectID, roomID, articleID, reason, mod
 	r.mu.Lock()
 	var rootMsg *Message
 	newText := fmt.Sprintf("[此文章已被版主 %s 刪除，原因: %s]", modName, reason)
-	for i := range r.Messages {
-		msg := &r.Messages[i]
-		targetArticleID := strings.TrimSpace(msg.ArticleID)
-		if targetArticleID == "" {
-			targetArticleID = msg.ID
-		}
-		if targetArticleID != articleID {
-			continue
-		}
-		// Root message of article
-		if strings.TrimSpace(msg.ReplyToMessageID) == "" {
-			if !strings.HasPrefix(msg.Title, "[已刪除]") {
-				msg.Title = "[已刪除] " + msg.Title
+	isSoft := s.SoftDeleteEnabled()
+
+	if !isSoft {
+		// Hard delete: purge all messages belonging to this article from room memory
+		retained := make([]Message, 0, len(r.Messages))
+		for i := range r.Messages {
+			msg := &r.Messages[i]
+			targetArticleID := strings.TrimSpace(msg.ArticleID)
+			if targetArticleID == "" {
+				targetArticleID = msg.ID
 			}
-			msg.Text = newText
-			if msg.Meta == nil {
-				msg.Meta = make(map[string]any)
+			if targetArticleID == articleID {
+				if strings.TrimSpace(msg.ReplyToMessageID) == "" {
+					rootMsgCopy := *msg
+					rootMsg = &rootMsgCopy
+				}
+				continue
 			}
-			msg.Meta["deleted"] = true
-			msg.Meta["deleted_by"] = modName
-			msg.Meta["delete_reason"] = reason
-			rootMsgCopy := *msg
-			rootMsg = &rootMsgCopy
+			retained = append(retained, *msg)
 		}
-	}
-	if rootMsg == nil {
-		r.mu.Unlock()
-		return nil, ErrMessageNotFound
+		if rootMsg == nil {
+			r.mu.Unlock()
+			return nil, ErrMessageNotFound
+		}
+		r.Messages = retained
+	} else {
+		// Soft delete: keep row and append soft-deleted tombstone
+		for i := range r.Messages {
+			msg := &r.Messages[i]
+			targetArticleID := strings.TrimSpace(msg.ArticleID)
+			if targetArticleID == "" {
+				targetArticleID = msg.ID
+			}
+			if targetArticleID != articleID {
+				continue
+			}
+			// Root message of article
+			if strings.TrimSpace(msg.ReplyToMessageID) == "" {
+				if !strings.HasPrefix(msg.Title, "[已刪除]") {
+					msg.Title = "[已刪除] " + msg.Title
+				}
+				msg.Text = newText
+				if msg.Meta == nil {
+					msg.Meta = make(map[string]any)
+				}
+				msg.Meta["deleted"] = true
+				msg.Meta["deleted_by"] = modName
+				msg.Meta["delete_reason"] = reason
+				rootMsgCopy := *msg
+				rootMsg = &rootMsgCopy
+			}
+		}
+		if rootMsg == nil {
+			r.mu.Unlock()
+			return nil, ErrMessageNotFound
+		}
 	}
 
 	r.cachedSimpleArticles = nil

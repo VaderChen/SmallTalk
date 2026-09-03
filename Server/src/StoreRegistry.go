@@ -26,6 +26,8 @@ type AgentRegistryEntry struct {
 	Token          string         `json:"token,omitempty"`
 	ReadOnly       bool           `json:"read_only"`
 	ReadOnlyAt     string         `json:"read_only_at,omitempty"`
+	IsAdmin        bool           `json:"is_admin"`
+	IsAdminAt      string         `json:"is_admin_at,omitempty"`
 	Meta           map[string]any `json:"meta,omitempty"`
 }
 
@@ -51,6 +53,8 @@ type agentRegistryDiskEntry struct {
 	Token          string         `json:"token,omitempty"`
 	ReadOnly       bool           `json:"read_only"`
 	ReadOnlyAt     string         `json:"read_only_at,omitempty"`
+	IsAdmin        bool           `json:"is_admin"`
+	IsAdminAt      string         `json:"is_admin_at,omitempty"`
 	Meta           map[string]any `json:"meta,omitempty"`
 }
 
@@ -107,6 +111,8 @@ func (s *Store) LoadRegistry() error {
 			Token:          strings.TrimSpace(item.Token),
 			ReadOnly:       item.ReadOnly,
 			ReadOnlyAt:     strings.TrimSpace(item.ReadOnlyAt),
+			IsAdmin:        item.IsAdmin,
+			IsAdminAt:      strings.TrimSpace(item.IsAdminAt),
 			Meta:           cloneMeta(item.Meta),
 		}
 	}
@@ -134,6 +140,8 @@ func (s *Store) SaveRegistry() error {
 			Token:          item.Token,
 			ReadOnly:       item.ReadOnly,
 			ReadOnlyAt:     item.ReadOnlyAt,
+			IsAdmin:        item.IsAdmin,
+			IsAdminAt:      item.IsAdminAt,
 			Meta:           cloneMeta(item.Meta),
 		}
 	}
@@ -164,6 +172,8 @@ func (s *Store) UpsertAgentRegistry(in AgentRegistryUpsert) (AgentRegistryEntry,
 		return AgentRegistryEntry{}, ErrMissingClientID
 	}
 
+	newDisplayName := strings.TrimSpace(in.DisplayName)
+
 	now := in.LastSeenAt
 	if now.IsZero() {
 		now = time.Now()
@@ -172,13 +182,27 @@ func (s *Store) UpsertAgentRegistry(in AgentRegistryUpsert) (AgentRegistryEntry,
 	macAddress := normalizeMACAddress(in.MACAddress)
 
 	s.mu.Lock()
+
+	// Check for duplicate display_name across all other agents (blocks renaming or registering with taken names)
+	if newDisplayName != "" {
+		for otherID, otherEntry := range s.agentRegistry {
+			if otherEntry == nil || otherID == clientID {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(otherEntry.DisplayName), newDisplayName) {
+				s.mu.Unlock()
+				return AgentRegistryEntry{}, fmt.Errorf("【名稱重複衝突】顯示名稱 '%s' 已經被其他帳號 (%s) 使用，無法使用或更改為此名稱", newDisplayName, otherID)
+			}
+		}
+	}
+
 	entry, ok := s.agentRegistry[clientID]
 	if !ok || entry == nil {
 		entry = &AgentRegistryEntry{
 			ClientID:     clientID,
 			RegisteredAt: nowText,
 			LastSeenAt:   nowText,
-			DisplayName:  strings.TrimSpace(in.DisplayName),
+			DisplayName:  newDisplayName,
 			MACAddress:   macAddress,
 			Blocked:      false,
 			TokenIssued:  false,
@@ -187,8 +211,8 @@ func (s *Store) UpsertAgentRegistry(in AgentRegistryUpsert) (AgentRegistryEntry,
 		s.agentRegistry[clientID] = entry
 	} else {
 		entry.LastSeenAt = nowText
-		if strings.TrimSpace(in.DisplayName) != "" {
-			entry.DisplayName = strings.TrimSpace(in.DisplayName)
+		if newDisplayName != "" {
+			entry.DisplayName = newDisplayName
 		}
 		if macAddress != "" {
 			entry.MACAddress = macAddress
@@ -348,6 +372,125 @@ func (s *Store) SetAgentReadOnly(clientID string, readOnly bool, at time.Time) (
 	s.mu.Unlock()
 
 	return out, s.SaveRegistry()
+}
+
+func (s *Store) SetAgentAdmin(clientID string, isAdmin bool) (AgentRegistryEntry, error) {
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return AgentRegistryEntry{}, ErrMissingClientID
+	}
+
+	s.mu.Lock()
+	entry, ok := s.agentRegistry[clientID]
+	if !ok || entry == nil {
+		s.mu.Unlock()
+		return AgentRegistryEntry{}, fmt.Errorf("agent not found")
+	}
+	entry.IsAdmin = isAdmin
+	if isAdmin {
+		entry.IsAdminAt = time.Now().Format(time.RFC3339Nano)
+	} else {
+		entry.IsAdminAt = ""
+	}
+	out := *entry
+	if entry.Meta != nil {
+		out.Meta = cloneMeta(entry.Meta)
+	}
+	s.mu.Unlock()
+
+	return out, s.SaveRegistry()
+}
+
+func (s *Store) GetAgentRole(clientID string) (bool, []string, error) {
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return false, nil, ErrMissingClientID
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entry, ok := s.agentRegistry[clientID]
+	if !ok || entry == nil {
+		return false, nil, fmt.Errorf("agent not found")
+	}
+	isAdmin := entry.IsAdmin
+	displayName := strings.TrimSpace(entry.DisplayName)
+
+	var modRooms []string
+	for pid, p := range s.projects {
+		if p == nil {
+			continue
+		}
+		for rid, r := range p.Rooms {
+			if r == nil {
+				continue
+			}
+			owner := strings.TrimSpace(r.Owner)
+			if owner != "" && (owner == clientID || (displayName != "" && owner == displayName)) {
+				modRooms = append(modRooms, fmt.Sprintf("%s/%s", pid, rid))
+			}
+		}
+	}
+	return isAdmin, modRooms, nil
+}
+
+func (s *Store) SetAgentRole(clientID string, isAdmin bool, moderatorRooms []string) error {
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return ErrMissingClientID
+	}
+	s.mu.Lock()
+	entry, ok := s.agentRegistry[clientID]
+	if !ok || entry == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("agent not found")
+	}
+	entry.IsAdmin = isAdmin
+	if isAdmin {
+		entry.IsAdminAt = time.Now().Format(time.RFC3339Nano)
+	} else {
+		entry.IsAdminAt = ""
+	}
+	displayName := strings.TrimSpace(entry.DisplayName)
+	s.mu.Unlock()
+
+	if err := s.SaveRegistry(); err != nil {
+		return err
+	}
+
+	targetSet := make(map[string]bool)
+	for _, roomKey := range moderatorRooms {
+		targetSet[strings.TrimSpace(roomKey)] = true
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for pid, p := range s.projects {
+		if p == nil {
+			continue
+		}
+		for rid, r := range p.Rooms {
+			if r == nil {
+				continue
+			}
+			if strings.EqualFold(rid, "announce") || strings.EqualFold(rid, "visitors") {
+				continue
+			}
+			fullKey := fmt.Sprintf("%s/%s", pid, rid)
+			isTarget := targetSet[fullKey] || targetSet[rid]
+			currentOwner := strings.TrimSpace(r.Owner)
+			isCurrentlyOwner := (currentOwner == clientID || (displayName != "" && currentOwner == displayName))
+
+			if isTarget && !isCurrentlyOwner {
+				r.Owner = clientID
+				_ = s.saveRoomMetaLocked(pid, r)
+			} else if !isTarget && isCurrentlyOwner {
+				r.Owner = ""
+				_ = s.saveRoomMetaLocked(pid, r)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (s *Store) IsAgentReadOnly(clientID string) bool {
@@ -528,6 +671,118 @@ func (s *Store) FindTrustedAgentByMACAndIP(macAddress, sourceIP string) (AgentRe
 			}
 			return out, true
 		}
+	}
+	return AgentRegistryEntry{}, false
+}
+
+func isSameSubnetOrLocal(ip1, ip2 string) bool {
+	ip1 = strings.TrimSpace(ip1)
+	ip2 = strings.TrimSpace(ip2)
+	if ip1 == "" || ip2 == "" {
+		return false
+	}
+	if ip1 == ip2 {
+		return true
+	}
+	if (ip1 == "127.0.0.1" || ip1 == "::1" || ip1 == "localhost") &&
+		(ip2 == "127.0.0.1" || ip2 == "::1" || ip2 == "localhost") {
+		return true
+	}
+	p1 := strings.Split(ip1, ".")
+	p2 := strings.Split(ip2, ".")
+	if len(p1) == 4 && len(p2) == 4 {
+		return p1[0] == p2[0] && p1[1] == p2[1] && p1[2] == p2[2]
+	}
+	return false
+}
+
+func (s *Store) FindAgentRegistryByDisplayName(displayName, sourceIP string) (AgentRegistryEntry, bool) {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return AgentRegistryEntry{}, false
+	}
+	sourceIP = strings.TrimSpace(sourceIP)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var exactIPMatch *AgentRegistryEntry
+	var fallbackMatch *AgentRegistryEntry
+
+	for _, item := range s.agentRegistry {
+		if item == nil {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(item.DisplayName), displayName) {
+			continue
+		}
+
+		itemIP := ""
+		if item.Meta != nil {
+			if ip, ok := item.Meta["source_ip"].(string); ok {
+				itemIP = strings.TrimSpace(ip)
+			}
+			if itemIP == "" {
+				if ip, ok := item.Meta["dev_login_ip"].(string); ok {
+					itemIP = strings.TrimSpace(ip)
+				}
+			}
+		}
+
+		if sourceIP != "" && itemIP != "" && isSameSubnetOrLocal(itemIP, sourceIP) {
+			if exactIPMatch == nil || (!exactIPMatch.TokenIssued && item.TokenIssued) || item.LastSeenAt > exactIPMatch.LastSeenAt {
+				exactIPMatch = item
+			}
+		}
+
+		if fallbackMatch == nil {
+			fallbackMatch = item
+		} else if (!fallbackMatch.Approved && item.Approved) || (!fallbackMatch.TokenIssued && item.TokenIssued) || item.LastSeenAt > fallbackMatch.LastSeenAt {
+			fallbackMatch = item
+		}
+	}
+
+	best := exactIPMatch
+	if best == nil {
+		best = fallbackMatch
+	}
+
+	if best != nil {
+		out := *best
+		if best.Meta != nil {
+			out.Meta = cloneMeta(best.Meta)
+		}
+		return out, true
+	}
+
+	return AgentRegistryEntry{}, false
+}
+
+func (s *Store) FindAgentRegistryByExactDisplayName(displayName string) (AgentRegistryEntry, bool) {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return AgentRegistryEntry{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var best *AgentRegistryEntry
+	for _, item := range s.agentRegistry {
+		if item == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(item.DisplayName), displayName) {
+			if best == nil || (!best.TokenIssued && item.TokenIssued) || item.LastSeenAt > best.LastSeenAt {
+				best = item
+			}
+		}
+	}
+	if best != nil {
+		out := *best
+		if best.Meta != nil {
+			out.Meta = cloneMeta(best.Meta)
+		}
+		return out, true
 	}
 	return AgentRegistryEntry{}, false
 }

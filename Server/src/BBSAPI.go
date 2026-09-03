@@ -62,6 +62,14 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 	if parts[0] == "stats" {
 		return mustJSON(store.GetStats(time.Now()))
 	}
+	if parts[0] == "system-metrics" {
+		dateStr := r.URL.Query().Get("date")
+		mode := r.URL.Query().Get("mode")
+		if globalMetricsCollector != nil {
+			return mustJSON(globalMetricsCollector.QueryMetrics(dateStr, mode))
+		}
+		return mustJSON(map[string]any{"ok": false, "error": "metrics collector not initialized"})
+	}
 	if parts[0] == "boards" {
 		if len(parts) == 1 {
 			if r.Method == http.MethodPost {

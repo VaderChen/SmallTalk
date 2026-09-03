@@ -76,11 +76,70 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 			return mustJSON(ErrorResponse{Error: "method not allowed"})
 		}
 	}
+	if len(parts) == 1 && parts[0] == "system-policy" {
+		switch r.Method {
+		case http.MethodGet:
+			return mustJSON(api.Store.GetSystemPolicy())
+		case http.MethodPost:
+			if strings.TrimSpace(body) == "" && r.Body != nil {
+				data, _ := io.ReadAll(r.Body)
+				body = string(data)
+			}
+			var req SystemPolicyConfig
+			if err := json.Unmarshal([]byte(body), &req); err != nil {
+				return mustJSON(ErrorResponse{Error: "invalid json"})
+			}
+			if err := api.Store.SetSystemPolicy(req); err != nil {
+				return mustJSON(ErrorResponse{Error: "save system policy failed: " + err.Error()})
+			}
+			return mustJSON(api.Store.GetSystemPolicy())
+		default:
+			return mustJSON(ErrorResponse{Error: "method not allowed"})
+		}
+	}
 	if len(parts) == 1 && parts[0] == "rooms" {
 		if r.Method != http.MethodGet {
 			return mustJSON(ErrorResponse{Error: "method not allowed"})
 		}
 		return mustJSON(api.Store.ListAllRooms(time.Now()))
+	}
+	if len(parts) >= 2 && parts[0] == "rooms" && parts[1] == "update" {
+		if r.Method != http.MethodPost {
+			return mustJSON(ErrorResponse{Error: "method not allowed"})
+		}
+		if strings.TrimSpace(body) == "" && r.Body != nil {
+			data, _ := io.ReadAll(r.Body)
+			body = string(data)
+		}
+		var req struct {
+			ProjectID   string `json:"project_id"`
+			RoomID      string `json:"room_id"`
+			Room        string `json:"room"`
+			Name        string `json:"name"`
+			Category    string `json:"category"`
+			Description string `json:"description"`
+			Owner       string `json:"owner"`
+			Pinned      *bool  `json:"pinned"`
+		}
+		if err := json.Unmarshal([]byte(body), &req); err != nil {
+			return mustJSON(ErrorResponse{Error: "invalid json"})
+		}
+		roomStr := firstNonEmpty(req.Room, req.RoomID)
+		projectID := req.ProjectID
+		roomID := req.RoomID
+		if strings.Contains(roomStr, "/") {
+			p := strings.SplitN(roomStr, "/", 2)
+			projectID = p[0]
+			roomID = p[1]
+		} else if projectID == "" {
+			projectID = "default"
+			roomID = roomStr
+		}
+		updated, err := api.Store.UpdateRoomFull(projectID, roomID, req.Name, req.Category, req.Description, req.Owner, req.Pinned)
+		if err != nil {
+			return mustJSON(ErrorResponse{Error: err.Error()})
+		}
+		return mustJSON(map[string]any{"ok": true, "room": updated})
 	}
 	if len(parts) == 2 && parts[1] == "read-only" {
 		if r.Method != http.MethodPost {
@@ -109,6 +168,51 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 			return mustJSON(ErrorResponse{Error: err.Error()})
 		}
 		return mustJSON(map[string]any{"ok": true, "client_id": clientID})
+	}
+	if len(parts) == 2 && parts[1] == "role" {
+		clientID := strings.TrimSpace(parts[0])
+		switch r.Method {
+		case http.MethodGet:
+			isAdmin, modRooms, err := api.Store.GetAgentRole(clientID)
+			if err != nil {
+				return mustJSON(ErrorResponse{Error: err.Error()})
+			}
+			displayName := ""
+			if entry, ok := api.Store.GetAgentRegistry(clientID); ok {
+				displayName = entry.DisplayName
+			}
+			return mustJSON(map[string]any{
+				"ok":              true,
+				"client_id":       clientID,
+				"display_name":    displayName,
+				"is_admin":        isAdmin,
+				"moderator_rooms": modRooms,
+			})
+		case http.MethodPost:
+			if strings.TrimSpace(body) == "" && r.Body != nil {
+				data, _ := io.ReadAll(r.Body)
+				body = string(data)
+			}
+			var req struct {
+				IsAdmin        bool     `json:"is_admin"`
+				ModeratorRooms []string `json:"moderator_rooms"`
+			}
+			if err := json.Unmarshal([]byte(body), &req); err != nil {
+				return mustJSON(ErrorResponse{Error: "invalid json"})
+			}
+			if err := api.Store.SetAgentRole(clientID, req.IsAdmin, req.ModeratorRooms); err != nil {
+				return mustJSON(ErrorResponse{Error: err.Error()})
+			}
+			isAdmin, modRooms, _ := api.Store.GetAgentRole(clientID)
+			return mustJSON(map[string]any{
+				"ok":              true,
+				"client_id":       clientID,
+				"is_admin":        isAdmin,
+				"moderator_rooms": modRooms,
+			})
+		default:
+			return mustJSON(ErrorResponse{Error: "method not allowed"})
+		}
 	}
 	if len(parts) != 1 {
 		return mustJSON(ErrorResponse{Error: "not found"})

@@ -5,6 +5,15 @@ import (
 	"time"
 )
 
+func isDefaultPinnedRoom(roomID string) bool {
+	switch strings.ToLower(strings.TrimSpace(roomID)) {
+	case "announce", "apply", "board-apply", "feedback", "lobby", "visitors":
+		return true
+	default:
+		return false
+	}
+}
+
 type Stats struct {
 	Projects int `json:"projects"`
 	Rooms    int `json:"rooms"`
@@ -40,11 +49,13 @@ type Stats struct {
 type RoomInfo struct {
 	ProjectID   string `json:"project_id"`
 	RoomID      string `json:"room_id"`
+	Room        string `json:"room"`
 	Board       string `json:"board"`
 	Name        string `json:"name"`
 	Category    string `json:"category,omitempty"`
 	Description string `json:"description,omitempty"`
 	Owner       string `json:"owner,omitempty"`
+	Pinned      bool   `json:"pinned,omitempty"`
 	IsModerator bool   `json:"is_moderator,omitempty"`
 
 	MessagesInMemory int    `json:"messages_in_memory"`
@@ -156,11 +167,13 @@ func (s *Store) ListAllRooms(now time.Time) []RoomInfo {
 		info := RoomInfo{
 			ProjectID:        item.pid,
 			RoomID:           item.rid,
+			Room:             item.pid + "/" + item.rid,
 			Board:            item.rid,
 			Name:             item.r.Name,
 			Category:         item.r.Category,
 			Description:      item.r.Description,
 			Owner:            item.r.Owner,
+			Pinned:           item.r.Pinned || isDefaultPinnedRoom(item.rid),
 			MessagesInMemory: len(item.r.Messages),
 		}
 		var lastMsg time.Time
@@ -185,22 +198,31 @@ func (s *Store) ListAllRooms(now time.Time) []RoomInfo {
 		out = append(out, info)
 	}
 
-	// sort: announce=1, lobby=2, then room asc
-	boardPriority := func(roomID string) int {
-		switch strings.ToLower(strings.TrimSpace(roomID)) {
+	// sort: announce=1, apply=2, feedback=3, lobby=4, visitors=5, other pinned=10, then room asc
+	boardPriority := func(info RoomInfo) int {
+		switch strings.ToLower(strings.TrimSpace(info.RoomID)) {
 		case "announce":
 			return 1
-		case "lobby":
+		case "apply", "board-apply":
 			return 2
+		case "feedback":
+			return 3
+		case "lobby":
+			return 4
+		case "visitors":
+			return 5
 		default:
+			if info.Pinned {
+				return 10
+			}
 			return 999
 		}
 	}
 
 	for i := 0; i < len(out)-1; i++ {
 		for j := i + 1; j < len(out); j++ {
-			priI := boardPriority(out[i].RoomID)
-			priJ := boardPriority(out[j].RoomID)
+			priI := boardPriority(out[i])
+			priJ := boardPriority(out[j])
 			if priJ < priI || (priI == priJ && (strings.ToLower(out[j].RoomID) < strings.ToLower(out[i].RoomID))) {
 				out[i], out[j] = out[j], out[i]
 			}

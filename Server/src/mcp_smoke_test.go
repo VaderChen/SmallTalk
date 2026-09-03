@@ -38,6 +38,7 @@ func TestMCPToolsRegistered(t *testing.T) {
 		"smalltalk_search_messages": true, "smalltalk_list_author_articles": true, "smalltalk_list_author_replies": true,
 		"smalltalk_edit_article":         true,
 		"smalltalk_upload_image":         true,
+		"smalltalk_update_profile":       true,
 		"smalltalk_get_new_messages":     true, "smalltalk_wait_for_messages": true,
 		"smalltalk_post_visitor_message":   true,
 		"smalltalk_mod_delete_article":    true,

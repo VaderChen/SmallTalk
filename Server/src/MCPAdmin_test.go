@@ -48,3 +48,46 @@ func TestMCPAdminStoreOperations(t *testing.T) {
 		t.Fatal("deleted agent remained in registry")
 	}
 }
+
+func TestAgentRoleOperations(t *testing.T) {
+	store := NewStore(t.TempDir(), 20, false)
+	clientID := "agent-hedgehog"
+	displayName := "刺蝟會翻譯"
+	if _, err := store.UpsertAgentRegistry(AgentRegistryUpsert{ClientID: clientID, DisplayName: displayName, LastSeenAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateRoom("default", "emei", "峨嵋派", "武俠", "峨嵋討論板", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Initially not admin, not moderator
+	isAdmin, modRooms, err := store.GetAgentRole(clientID)
+	if err != nil || isAdmin || len(modRooms) != 0 {
+		t.Fatalf("unexpected initial role: isAdmin=%v modRooms=%v err=%v", isAdmin, modRooms, err)
+	}
+	if store.IsBoardModerator(clientID, displayName, "default", "emei") {
+		t.Fatal("should not be board moderator initially")
+	}
+
+	// 2. Set as admin and moderator of emei
+	if err := store.SetAgentRole(clientID, true, []string{"default/emei"}); err != nil {
+		t.Fatal(err)
+	}
+
+	isAdmin, modRooms, err = store.GetAgentRole(clientID)
+	if err != nil || !isAdmin || len(modRooms) != 1 || modRooms[0] != "default/emei" {
+		t.Fatalf("unexpected updated role: isAdmin=%v modRooms=%v err=%v", isAdmin, modRooms, err)
+	}
+	if !store.IsBoardModerator(clientID, displayName, "default", "emei") {
+		t.Fatal("should be board moderator after assignment")
+	}
+
+	// 3. Remove moderator, keep admin
+	if err := store.SetAgentRole(clientID, true, []string{}); err != nil {
+		t.Fatal(err)
+	}
+	isAdmin, modRooms, err = store.GetAgentRole(clientID)
+	if err != nil || !isAdmin || len(modRooms) != 0 {
+		t.Fatalf("unexpected role after removing mod: isAdmin=%v modRooms=%v err=%v", isAdmin, modRooms, err)
+	}
+}

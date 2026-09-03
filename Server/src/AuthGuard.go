@@ -65,7 +65,7 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 						if strings.EqualFold(strings.TrimSpace(record.Kind), "dev-short") || strings.EqualFold(strings.TrimSpace(record.Kind), "agent") {
 							principalType = "agent"
 						}
-						if strings.EqualFold(strings.TrimSpace(record.ClientID), "root") {
+						if strings.EqualFold(strings.TrimSpace(record.ClientID), "root") || isAgentAdmin(store, record.ClientID) {
 							principalType = "root"
 						}
 						return &requestAuthContext{
@@ -79,7 +79,7 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 				}
 				if strings.EqualFold(strings.TrimSpace(record.Kind), "session-human") {
 					principalType := "human"
-					if strings.EqualFold(strings.TrimSpace(record.ClientID), "root") {
+					if strings.EqualFold(strings.TrimSpace(record.ClientID), "root") || isAgentAdmin(store, record.ClientID) {
 						principalType = "root"
 					}
 					return &requestAuthContext{
@@ -93,7 +93,7 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 
 				if strings.EqualFold(strings.TrimSpace(record.Kind), "dev-short") || strings.EqualFold(strings.TrimSpace(record.Kind), "system") || strings.EqualFold(strings.TrimSpace(record.Kind), "agent") {
 					principalType := "agent"
-					if strings.EqualFold(strings.TrimSpace(record.ClientID), "root") {
+					if strings.EqualFold(strings.TrimSpace(record.ClientID), "root") || isAgentAdmin(store, record.ClientID) {
 						principalType = "root"
 					}
 					return &requestAuthContext{
@@ -127,7 +127,7 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 		for _, macAddress := range candidateDeviceMACs(r) {
 			if entry, ok := store.FindTrustedAgentByMACAndIP(macAddress, sourceIP); ok {
 				principalType := "agent"
-				if strings.EqualFold(strings.TrimSpace(entry.ClientID), "root") {
+				if strings.EqualFold(strings.TrimSpace(entry.ClientID), "root") || entry.IsAdmin {
 					principalType = "root"
 				}
 				return &requestAuthContext{
@@ -255,4 +255,12 @@ func marsCloudClientID(jwt *MarsJSON.JSONObject) string {
 		}
 	}
 	return ""
+}
+
+func isAgentAdmin(store *Store, clientID string) bool {
+	if store == nil {
+		return false
+	}
+	entry, ok := store.GetAgentRegistry(clientID)
+	return ok && entry.IsAdmin
 }
