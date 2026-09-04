@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync"
 	"time"
 
 	"github.com/MarsSemi/MarsCloud-SaaS/SDK/MarsJSON"
@@ -9,9 +10,10 @@ import (
 )
 
 type SmallTalkService struct {
-	Counter      int
 	MCPListeners *MCPListenerSet
 	stopWorkers  []func()
+	processStop  chan struct{}
+	processOnce  sync.Once
 }
 
 // The MarsService SDK still exposes legacy MQTT callbacks. They intentionally
@@ -22,11 +24,10 @@ func (s *SmallTalkService) OnMQTTMessage(string, string) {}
 
 func (s *SmallTalkService) Process() {
 	Tools.Log.Print(Tools.LL_Info, "SmallTalkService started")
-	for {
-		s.Counter++
-		Tools.Log.Print(Tools.LL_Debug, "[%s] counter=%d", time.Now().Format("15:04:05"), s.Counter)
-		time.Sleep(30 * time.Second)
+	if s == nil || s.processStop == nil {
+		return
 	}
+	<-s.processStop
 }
 
 func (s *SmallTalkService) OnPropertyChange(property *MarsJSON.JSONObject) {
@@ -39,6 +40,11 @@ func (s *SmallTalkService) BeforeServiceStop() {
 	if s == nil {
 		return
 	}
+	s.processOnce.Do(func() {
+		if s.processStop != nil {
+			close(s.processStop)
+		}
+	})
 	for i := len(s.stopWorkers) - 1; i >= 0; i-- {
 		if s.stopWorkers[i] != nil {
 			s.stopWorkers[i]()

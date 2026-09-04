@@ -91,6 +91,10 @@ func (s *SmallTalkFacade) PublishMessage(clientID, projectID, roomID string, msg
 	if s == nil || s.Store == nil {
 		return fmt.Errorf("store not available")
 	}
+	clientID = strings.TrimSpace(clientID)
+	if s.Store.IsAgentReadOnly(clientID) {
+		return fmt.Errorf("account '%s' is in read-only mode", clientID)
+	}
 	if strings.TrimSpace(msg.Text) == "" {
 		return fmt.Errorf("message text is required")
 	}
@@ -106,11 +110,18 @@ func (s *SmallTalkFacade) PublishMessage(clientID, projectID, roomID string, msg
 	if meta, err := json.Marshal(msg.Meta); err != nil || len(meta) > maxMessageMetaBytes {
 		return fmt.Errorf("message metadata exceeds maximum size or is invalid")
 	}
-	if strings.TrimSpace(msg.ProjectID) == "" {
-		msg.ProjectID = strings.TrimSpace(projectID)
-	}
-	if strings.TrimSpace(msg.RoomID) == "" {
-		msg.RoomID = strings.TrimSpace(roomID)
+	// The authenticated/authorized route is authoritative. Never let a caller
+	// authorize one board or identity while writing another into the message.
+	msg.ProjectID = strings.TrimSpace(projectID)
+	msg.RoomID = strings.TrimSpace(roomID)
+	msg.AgentID = clientID
+	if !strings.EqualFold(clientID, "guest") {
+		authorName := clientID
+		if entry, ok := s.Store.GetAgentRegistry(clientID); ok && strings.TrimSpace(entry.DisplayName) != "" {
+			authorName = strings.TrimSpace(entry.DisplayName)
+		}
+		msg.DisplayName = authorName
+		msg.Author = authorName
 	}
 	return s.Store.AddMessage(msg)
 }
@@ -157,6 +168,9 @@ func (s *SmallTalkFacade) EditArticle(clientID, projectID, roomID, messageID, ti
 	if err := s.authorizeRoom(clientID, projectID, roomID); err != nil {
 		return nil, err
 	}
+	if s.Store.IsAgentReadOnly(clientID) {
+		return nil, fmt.Errorf("account '%s' is in read-only mode", strings.TrimSpace(clientID))
+	}
 	editorIDs := []string{clientID}
 	if entry, ok := s.Store.GetAgentRegistry(clientID); ok && strings.TrimSpace(entry.DisplayName) != "" {
 		editorIDs = append(editorIDs, entry.DisplayName)
@@ -165,30 +179,39 @@ func (s *SmallTalkFacade) EditArticle(clientID, projectID, roomID, messageID, ti
 }
 
 func (s *SmallTalkFacade) CreateRoom(clientID, projectID, roomID, name, category, description, owner string) (*Room, error) {
+	if s == nil || s.Store == nil {
+		return nil, fmt.Errorf("store not available")
+	}
 	if strings.TrimSpace(clientID) == "" {
 		return nil, ErrMissingClientID
 	}
-	if !strings.EqualFold(strings.TrimSpace(clientID), "root") {
+	if !strings.EqualFold(strings.TrimSpace(clientID), "root") && !isAgentAdmin(s.Store, clientID) {
 		return nil, ErrForbidden
 	}
 	return s.Store.CreateRoom(projectID, roomID, name, category, description, owner)
 }
 
 func (s *SmallTalkFacade) UpdateRoom(clientID, projectID, roomID, name, category, description, owner string) (*Room, error) {
+	if s == nil || s.Store == nil {
+		return nil, fmt.Errorf("store not available")
+	}
 	if strings.TrimSpace(clientID) == "" {
 		return nil, ErrMissingClientID
 	}
-	if !strings.EqualFold(strings.TrimSpace(clientID), "root") {
+	if !strings.EqualFold(strings.TrimSpace(clientID), "root") && !isAgentAdmin(s.Store, clientID) {
 		return nil, ErrForbidden
 	}
 	return s.Store.UpdateRoom(projectID, roomID, name, category, description, owner)
 }
 
 func (s *SmallTalkFacade) DeleteRoom(clientID, projectID, roomID string) error {
+	if s == nil || s.Store == nil {
+		return fmt.Errorf("store not available")
+	}
 	if strings.TrimSpace(clientID) == "" {
 		return ErrMissingClientID
 	}
-	if !strings.EqualFold(strings.TrimSpace(clientID), "root") {
+	if !strings.EqualFold(strings.TrimSpace(clientID), "root") && !isAgentAdmin(s.Store, clientID) {
 		return ErrForbidden
 	}
 	return s.Store.DeleteRoom(projectID, roomID)

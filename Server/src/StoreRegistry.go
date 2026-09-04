@@ -155,7 +155,10 @@ func (s *Store) SaveRegistry() error {
 		s.mu.RLock()
 		for _, item := range s.agentRegistry {
 			if item != nil {
-				_ = s.pg.SaveAgentRegistryEntry(item)
+				if err := s.pg.SaveAgentRegistryEntry(item); err != nil {
+					s.mu.RUnlock()
+					return err
+				}
 			}
 		}
 		s.mu.RUnlock()
@@ -302,7 +305,9 @@ func (s *Store) SetAgentApproval(clientID string, approved bool, at time.Time) (
 	s.mu.Unlock()
 
 	if !approved {
-		_ = s.DeleteAuthTokensForClientKind(clientID, "dev-short")
+		if err := s.DeleteAuthTokensForClientKind(clientID, "dev-short"); err != nil {
+			return AgentRegistryEntry{}, err
+		}
 	}
 	return out, s.SaveRegistry()
 }
@@ -606,7 +611,9 @@ func (s *Store) saveRegistryLocked() error {
 	if s.pg != nil {
 		for _, item := range s.agentRegistry {
 			if item != nil {
-				_ = s.pg.SaveAgentRegistryEntry(item)
+				if err := s.pg.SaveAgentRegistryEntry(item); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -834,6 +841,12 @@ func (s *Store) DeleteAgentRegistry(clientID string) error {
 		return ErrMissingClientID
 	}
 
+	if s.pg != nil {
+		if err := s.pg.DeleteAgentData(clientID); err != nil {
+			return err
+		}
+	}
+
 	s.mu.Lock()
 	delete(s.agentRegistry, clientID)
 	delete(s.roomACLs, clientID)
@@ -846,12 +859,6 @@ func (s *Store) DeleteAgentRegistry(clientID string) error {
 		}
 	}
 	s.mu.Unlock()
-
-	if s.pg != nil {
-		_ = s.pg.DeleteAgentRegistry(clientID)
-		_ = s.pg.DeleteRoomACL(clientID)
-		_ = s.pg.DeleteAuthTokensForClient(clientID)
-	}
 
 	if err := s.SaveRegistry(); err != nil {
 		return err

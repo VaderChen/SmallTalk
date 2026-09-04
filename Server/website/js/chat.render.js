@@ -677,8 +677,8 @@
             <div>日期</div>
             <div>作者</div>
             <div>標題</div>
-            <div>今日回文</div>
-            <div>回文數</div>
+            <div>今日</div>
+            <div>人氣</div>
           `;
         }
         if (state.level === "search_messages") {

@@ -287,7 +287,10 @@ func (pg *PostgresStore) InsertMessage(m Message) error {
 		return err
 	}
 
-	metaJSON, _ := json.Marshal(m.Meta)
+	metaJSON, err := json.Marshal(m.Meta)
+	if err != nil {
+		return fmt.Errorf("encode message metadata: %w", err)
+	}
 	if len(metaJSON) == 0 {
 		metaJSON = []byte("{}")
 	}
@@ -348,17 +351,23 @@ func (pg *PostgresStore) UpdateMessageContentAndMeta(projectID, roomID, messageI
 	if err != nil {
 		return err
 	}
-	var metaBytes []byte
-	if meta != nil {
-		metaBytes, _ = json.Marshal(meta)
+	metaBytes, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("encode message metadata: %w", err)
 	}
 	query := fmt.Sprintf(`
 	UPDATE %s
 	SET title = $1, text = $2, meta = $3
 	WHERE id = $4;
 	`, tableName)
-	_, err = pg.db.Exec(query, title, text, metaBytes, messageID)
-	return err
+	res, err := pg.db.Exec(query, title, text, metaBytes, messageID)
+	if err != nil {
+		return err
+	}
+	if rows, rowsErr := res.RowsAffected(); rowsErr == nil && rows == 0 {
+		return ErrMessageNotFound
+	}
+	return nil
 }
 
 func (pg *PostgresStore) UpdateMessageMeta(projectID, roomID, messageID string, meta map[string]any) error {
@@ -369,24 +378,89 @@ func (pg *PostgresStore) UpdateMessageMeta(projectID, roomID, messageID string, 
 	if err != nil {
 		return err
 	}
-	var metaBytes []byte
-	if meta != nil {
-		metaBytes, _ = json.Marshal(meta)
+	metaBytes, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("encode message metadata: %w", err)
 	}
 	query := fmt.Sprintf(`
 	UPDATE %s
 	SET meta = $1
 	WHERE id = $2;
 	`, tableName)
-	_, err = pg.db.Exec(query, metaBytes, messageID)
+	res, err := pg.db.Exec(query, metaBytes, messageID)
+	if err != nil {
+		return err
+	}
+	if rows, rowsErr := res.RowsAffected(); rowsErr == nil && rows == 0 {
+		return ErrMessageNotFound
+	}
+	return nil
+}
+
+// DeleteBoard removes both the catalog entry and all board-owned data in one
+// transaction. Keeping the per-board table after deleting metadata would allow
+// old messages to reappear when the same board ID is created again.
+func (pg *PostgresStore) DeleteBoard(projectID, roomID string) error {
+	if pg == nil || pg.db == nil {
+		return nil
+	}
+	projectID = firstNonEmpty(projectID, "default")
+	tableName := pg.SanitizeTableName(projectID, roomID)
+	tx, err := pg.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`DELETE FROM presence WHERE project_id = $1 AND room_id = $2`, projectID, roomID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM boards WHERE project_id = $1 AND room_id = $2`, projectID, roomID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(fmt.Sprintf(`DROP TABLE IF EXISTS %s`, tableName)); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	pg.ensureTableMu.Lock()
+	delete(pg.knownTables, tableName)
+	pg.ensureTableMu.Unlock()
+	return nil
+}
+
+func (pg *PostgresStore) DeleteArticleMessages(projectID, roomID, articleID string) error {
+	if pg == nil || pg.db == nil {
+		return nil
+	}
+	tableName, err := pg.EnsureBoardTable(projectID, roomID)
+	if err != nil {
+		return err
+	}
+	projectID = firstNonEmpty(projectID, "default")
+	query := fmt.Sprintf(`DELETE FROM %s WHERE (project_id = $1 OR project_id = '' OR project_id = 'default') AND (room_id = $2 OR board = $2) AND (article_id = $3 OR id = $3)`, tableName)
+	_, err = pg.db.Exec(query, projectID, roomID, articleID)
 	return err
 }
 
-func (pg *PostgresStore) DeleteBoardMetadata(projectID, roomID string) error {
+func (pg *PostgresStore) DeleteMessage(projectID, roomID, messageID string) error {
+	if pg == nil || pg.db == nil {
+		return nil
+	}
+	tableName, err := pg.EnsureBoardTable(projectID, roomID)
+	if err != nil {
+		return err
+	}
 	projectID = firstNonEmpty(projectID, "default")
-	query := `DELETE FROM boards WHERE project_id = $1 AND room_id = $2;`
-	_, err := pg.db.Exec(query, projectID, roomID)
-	return err
+	query := fmt.Sprintf(`DELETE FROM %s WHERE id = $1 AND (project_id = $2 OR project_id = '' OR project_id = 'default') AND (room_id = $3 OR board = $3)`, tableName)
+	res, err := pg.db.Exec(query, messageID, projectID, roomID)
+	if err != nil {
+		return err
+	}
+	if rows, rowsErr := res.RowsAffected(); rowsErr == nil && rows == 0 {
+		return ErrMessageNotFound
+	}
+	return nil
 }
 
 func (pg *PostgresStore) DeleteMessagesOlderThan(projectID, roomID string, cutoff time.Time) (int64, error) {
@@ -732,6 +806,27 @@ func (pg *PostgresStore) DeleteAuthTokensForClientKind(clientID, kind string) er
 	return err
 }
 
+func (pg *PostgresStore) DeleteAgentData(clientID string) error {
+	if pg == nil || pg.db == nil {
+		return nil
+	}
+	tx, err := pg.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, query := range []string{
+		`DELETE FROM auth_tokens WHERE client_id = $1`,
+		`DELETE FROM room_acls WHERE client_id = $1`,
+		`DELETE FROM agent_registry WHERE client_id = $1`,
+	} {
+		if _, err := tx.Exec(query, clientID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (pg *PostgresStore) GetSystemConfig(key string) ([]byte, error) {
 	query := `SELECT value FROM system_config WHERE key = $1;`
 	var val []byte
@@ -777,6 +872,3 @@ func (pg *PostgresStore) CountTodayMessages(todayStart time.Time) int {
 	}
 	return total
 }
-
-
-

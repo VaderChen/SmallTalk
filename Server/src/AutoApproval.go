@@ -32,19 +32,26 @@ func (s *Store) LoadAutoApprovalConfig() error {
 	// 1. Try PostgreSQL if available
 	if s.pg != nil {
 		val, err := s.pg.GetSystemConfig("auto_approval")
-		if err == nil && len(val) > 0 {
-			var config autoApprovalDiskConfig
-			if err := json.Unmarshal(val, &config); err == nil {
-				if config.IntervalMinutes <= 0 {
-					config.IntervalMinutes = 1
-				}
-				s.autoApprovalMu.Lock()
-				s.autoApprovalEnabled = config.Enabled
-				s.autoApprovalIntervalMin = config.IntervalMinutes
-				s.autoApprovalMu.Unlock()
-				return nil
+		if err != nil {
+			return err
+		}
+		config := autoApprovalDiskConfig{IntervalMinutes: 1}
+		if len(val) > 0 {
+			if err := json.Unmarshal(val, &config); err != nil {
+				return fmt.Errorf("decode postgres auto approval config: %w", err)
 			}
 		}
+		if config.IntervalMinutes <= 0 {
+			config.IntervalMinutes = 1
+		}
+		s.autoApprovalMu.Lock()
+		s.autoApprovalEnabled = config.Enabled
+		s.autoApprovalIntervalMin = config.IntervalMinutes
+		s.autoApprovalMu.Unlock()
+		if len(val) == 0 {
+			return s.SaveAutoApprovalConfig()
+		}
+		return nil
 	}
 
 	// 2. Try Disk file
@@ -90,9 +97,7 @@ func (s *Store) SaveAutoApprovalConfig() error {
 
 	// 1. Save to PostgreSQL if available
 	if s.pg != nil {
-		if err := s.pg.SetSystemConfig("auto_approval", config); err != nil {
-			Tools.Log.Print(Tools.LL_Warning, "save auto approval to postgres failed: %v", err)
-		}
+		return s.pg.SetSystemConfig("auto_approval", config)
 	}
 
 	// 2. Save to Disk file
@@ -136,12 +141,18 @@ func (s *Store) SetAutoApprovalConfig(enabled bool, intervalMinutes int) error {
 	if intervalMinutes <= 0 {
 		intervalMinutes = 1
 	}
+	previousEnabled := s.AutoApprovalEnabled()
+	previousInterval := s.AutoApprovalIntervalMinutes()
 	s.autoApprovalMu.Lock()
 	s.autoApprovalEnabled = enabled
 	s.autoApprovalIntervalMin = intervalMinutes
 	s.autoApprovalMu.Unlock()
 
 	if err := s.SaveAutoApprovalConfig(); err != nil {
+		s.autoApprovalMu.Lock()
+		s.autoApprovalEnabled = previousEnabled
+		s.autoApprovalIntervalMin = previousInterval
+		s.autoApprovalMu.Unlock()
 		return err
 	}
 

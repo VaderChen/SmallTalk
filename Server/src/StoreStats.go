@@ -37,8 +37,8 @@ type Stats struct {
 	OnlineAgents int `json:"online_agents"`
 
 	// 5) 瀏覽與造訪人次統計
-	TodayVisitors int   `json:"today_visitors"`
-	TotalVisitors int64 `json:"total_visitors"`
+	TodayVisitors  int   `json:"today_visitors"`
+	TotalVisitors  int64 `json:"total_visitors"`
 	TodayPageViews int64 `json:"today_page_views"`
 	TotalPageViews int64 `json:"total_page_views"`
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Tools"
@@ -44,6 +45,7 @@ func StartHourlySummarizer(store *Store, memoryHubURL string, interval time.Dura
 	}
 
 	stop := make(chan struct{})
+	var stopOnce sync.Once
 	go func() {
 		// Align to the next interval boundary (hourly by default)
 		for {
@@ -69,7 +71,7 @@ func StartHourlySummarizer(store *Store, memoryHubURL string, interval time.Dura
 	}()
 
 	Tools.Log.Print(Tools.LL_Info, "Hourly summarizer enabled: interval=%s -> MemoryHub=%s", interval.String(), memoryHubURL)
-	return func() { close(stop) }
+	return func() { stopOnce.Do(func() { close(stop) }) }
 }
 
 func summarizeWindow(store *Store, memoryHubURL string, start, end time.Time) {

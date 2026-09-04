@@ -116,4 +116,3 @@ func TestBBSAPIFacadeIntegration(t *testing.T) {
 		t.Fatalf("empty response from BBSAPI search")
 	}
 }
-

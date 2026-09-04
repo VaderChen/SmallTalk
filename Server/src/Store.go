@@ -276,12 +276,18 @@ func NewStoreWithError(dataDir string, maxInMemMsgs int, persist bool) (*Store, 
 			}
 		}
 	}
-	_ = store.SaveAuthTokens()
+	if err := store.SaveAuthTokens(); err != nil {
+		return nil, fmt.Errorf("save auth tokens: %w", err)
+	}
 	if err := store.LoadAutoApprovalConfig(); err != nil {
 		return nil, fmt.Errorf("load auto approval config: %w", err)
 	}
-	_ = store.LoadSystemPolicy()
-	_ = store.LoadAdminPassword()
+	if err := store.LoadSystemPolicy(); err != nil {
+		return nil, fmt.Errorf("load system policy: %w", err)
+	}
+	if err := store.LoadAdminPassword(); err != nil {
+		return nil, fmt.Errorf("load admin password: %w", err)
+	}
 	if err := store.LoadMessagesFromDisk(); err != nil {
 		return nil, fmt.Errorf("load messages: %w", err)
 	}
@@ -317,7 +323,12 @@ func NewStoreWithPostgres(pg *PostgresStore, maxInMemMsgs int) (*Store, error) {
 	if err := store.LoadFromPostgres(); err != nil {
 		return nil, fmt.Errorf("load data from postgres: %w", err)
 	}
-	_ = store.LoadAdminPassword()
+	if err := store.LoadSystemPolicy(); err != nil {
+		return nil, fmt.Errorf("load system policy: %w", err)
+	}
+	if err := store.LoadAdminPassword(); err != nil {
+		return nil, fmt.Errorf("load admin password: %w", err)
+	}
 	return store, nil
 }
 
@@ -371,19 +382,28 @@ func (s *Store) LoadFromPostgres() error {
 
 	// 2. Load Agent Registry from PostgreSQL
 	pgRegistry, err := s.pg.LoadAllAgentRegistry()
-	if err == nil && pgRegistry != nil {
+	if err != nil {
+		return fmt.Errorf("load agent registry: %w", err)
+	}
+	if pgRegistry != nil {
 		s.agentRegistry = pgRegistry
 	}
 
 	// 3. Load Room ACLs from PostgreSQL
 	pgACLs, err := s.pg.LoadAllRoomACLs()
-	if err == nil && pgACLs != nil {
+	if err != nil {
+		return fmt.Errorf("load room ACLs: %w", err)
+	}
+	if pgACLs != nil {
 		s.roomACLs = pgACLs
 	}
 
 	// 4. Load Auth Tokens from PostgreSQL
 	pgTokens, err := s.pg.LoadAllAuthTokens()
-	if err == nil && pgTokens != nil {
+	if err != nil {
+		return fmt.Errorf("load auth tokens: %w", err)
+	}
+	if pgTokens != nil {
 		s.authTokens = pgTokens
 	}
 
@@ -412,14 +432,19 @@ func (s *Store) LoadFromPostgres() error {
 			}
 			s.authTokens[tok] = rec
 			if s.pg != nil {
-				_ = s.pg.SaveAuthToken(rec)
+				if err := s.pg.SaveAuthToken(rec); err != nil {
+					return fmt.Errorf("synchronize registry token: %w", err)
+				}
 			}
 		}
 	}
 
 	// 5. Load Presence from PostgreSQL
 	pgPresence, err := s.pg.LoadAllPresence()
-	if err == nil && pgPresence != nil {
+	if err != nil {
+		return fmt.Errorf("load presence: %w", err)
+	}
+	if pgPresence != nil {
 		for key, presMap := range pgPresence {
 			parts := strings.SplitN(key, "/", 2)
 			if len(parts) == 2 {
@@ -436,7 +461,9 @@ func (s *Store) LoadFromPostgres() error {
 	}
 
 	// 6. Load Auto Approval Config
-	_ = s.LoadAutoApprovalConfig()
+	if err := s.LoadAutoApprovalConfig(); err != nil {
+		return fmt.Errorf("load auto approval config: %w", err)
+	}
 
 	return nil
 }
@@ -462,7 +489,10 @@ func (s *Store) syncWithPostgres() error {
 
 	// 1. Sync Boards & Messages from PostgreSQL
 	pgBoards, err := s.pg.LoadAllBoards()
-	if err == nil && len(pgBoards) > 0 {
+	if err != nil {
+		return fmt.Errorf("load postgres boards for synchronization: %w", err)
+	}
+	if len(pgBoards) > 0 {
 		for _, b := range pgBoards {
 			pid := firstNonEmpty(b.ProjectID, "default")
 			p, ok := s.projects[pid]
@@ -497,7 +527,10 @@ func (s *Store) syncWithPostgres() error {
 					r.Owner = b.Owner
 				}
 			}
-			msgs, _ := s.pg.LoadMessagesForRoom(pid, b.RoomID, 2000)
+			msgs, err := s.pg.LoadMessagesForRoom(pid, b.RoomID, 2000)
+			if err != nil {
+				return fmt.Errorf("load messages for %s/%s: %w", pid, b.RoomID, err)
+			}
 			if len(msgs) > 0 {
 				r.Messages = msgs
 			}
@@ -507,49 +540,71 @@ func (s *Store) syncWithPostgres() error {
 	// For any memory boards not yet in PG, save them to PG
 	for pid, p := range s.projects {
 		for rid, r := range p.Rooms {
-			_ = s.pg.SaveBoardMetadata(pid, rid, r.Name, r.Category, r.Description, r.Owner)
+			if err := s.pg.SaveBoardMetadata(pid, rid, r.Name, r.Category, r.Description, r.Owner); err != nil {
+				return fmt.Errorf("save board %s/%s: %w", pid, rid, err)
+			}
 			for _, m := range r.Messages {
-				_ = s.pg.InsertMessage(m)
+				if err := s.pg.InsertMessage(m); err != nil {
+					return fmt.Errorf("save message %s: %w", m.ID, err)
+				}
 			}
 		}
 	}
 
 	// 2. Sync Agent Registry
 	pgRegistry, err := s.pg.LoadAllAgentRegistry()
-	if err == nil && len(pgRegistry) > 0 {
+	if err != nil {
+		return fmt.Errorf("load agent registry for synchronization: %w", err)
+	}
+	if len(pgRegistry) > 0 {
 		for k, v := range pgRegistry {
 			s.agentRegistry[k] = v
 		}
 	}
 	for _, entry := range s.agentRegistry {
-		_ = s.pg.SaveAgentRegistryEntry(entry)
+		if err := s.pg.SaveAgentRegistryEntry(entry); err != nil {
+			return fmt.Errorf("save agent registry: %w", err)
+		}
 	}
 
 	// 3. Sync ACLs
 	pgACLs, err := s.pg.LoadAllRoomACLs()
-	if err == nil && len(pgACLs) > 0 {
+	if err != nil {
+		return fmt.Errorf("load ACLs for synchronization: %w", err)
+	}
+	if len(pgACLs) > 0 {
 		for k, v := range pgACLs {
 			s.roomACLs[k] = v
 		}
 	}
 	for cid, acl := range s.roomACLs {
-		_ = s.pg.SaveRoomACL(cid, acl.Allow, acl.Deny)
+		if err := s.pg.SaveRoomACL(cid, acl.Allow, acl.Deny); err != nil {
+			return fmt.Errorf("save ACL for %s: %w", cid, err)
+		}
 	}
 
 	// 4. Sync Auth Tokens
 	pgTokens, err := s.pg.LoadAllAuthTokens()
-	if err == nil && len(pgTokens) > 0 {
+	if err != nil {
+		return fmt.Errorf("load auth tokens for synchronization: %w", err)
+	}
+	if len(pgTokens) > 0 {
 		for k, v := range pgTokens {
 			s.authTokens[k] = v
 		}
 	}
 	for _, tok := range s.authTokens {
-		_ = s.pg.SaveAuthToken(tok)
+		if err := s.pg.SaveAuthToken(tok); err != nil {
+			return fmt.Errorf("save auth token: %w", err)
+		}
 	}
 
 	// 5. Sync Presence
 	pgPresence, err := s.pg.LoadAllPresence()
-	if err == nil && len(pgPresence) > 0 {
+	if err != nil {
+		return fmt.Errorf("load presence for synchronization: %w", err)
+	}
+	if len(pgPresence) > 0 {
 		for key, presMap := range pgPresence {
 			parts := strings.SplitN(key, "/", 2)
 			if len(parts) == 2 {
@@ -566,7 +621,9 @@ func (s *Store) syncWithPostgres() error {
 	}
 
 	// 6. Sync Auto Approval Config
-	_ = s.SaveAutoApprovalConfig()
+	if err := s.SaveAutoApprovalConfig(); err != nil {
+		return fmt.Errorf("save auto approval config: %w", err)
+	}
 
 	return nil
 }
@@ -687,6 +744,7 @@ func (s *Store) UpdateRoomFull(projectID, roomID, name, category, description, o
 	if !ok {
 		return nil, ErrRoomNotFound
 	}
+	previous := Room{Board: r.Board, Name: r.Name, Category: r.Category, Description: r.Description, Owner: r.Owner, Pinned: r.Pinned}
 	r.Board = roomID
 	if strings.TrimSpace(name) != "" {
 		r.Name = strings.TrimSpace(name)
@@ -698,6 +756,12 @@ func (s *Store) UpdateRoomFull(projectID, roomID, name, category, description, o
 		r.Pinned = *pinned
 	}
 	if err := s.saveRoomMetaLocked(projectID, r); err != nil {
+		r.Board = previous.Board
+		r.Name = previous.Name
+		r.Category = previous.Category
+		r.Description = previous.Description
+		r.Owner = previous.Owner
+		r.Pinned = previous.Pinned
 		return nil, err
 	}
 	return &Room{ID: r.ID, Board: roomID, Name: r.Name, Category: r.Category, Description: r.Description, Owner: r.Owner, Pinned: r.Pinned}, nil
@@ -718,14 +782,17 @@ func (s *Store) DeleteRoom(projectID, roomID string) error {
 	if _, ok := p.Rooms[roomID]; !ok {
 		return ErrRoomNotFound
 	}
+	if s.pg != nil {
+		if err := s.pg.DeleteBoard(projectID, roomID); err != nil {
+			return fmt.Errorf("delete board from postgres: %w", err)
+		}
+	} else if s.dataDir != "" {
+		if err := os.RemoveAll(s.boardDir(projectID, roomID)); err != nil {
+			return fmt.Errorf("delete board files: %w", err)
+		}
+	}
 	delete(p.Rooms, roomID)
 	delete(s.roomLastMsgAt, projectID+"/"+roomID)
-	if s.pg != nil {
-		_ = s.pg.DeleteBoardMetadata(projectID, roomID)
-	}
-	if s.dataDir != "" {
-		_ = os.RemoveAll(s.boardDir(projectID, roomID))
-	}
 	return nil
 }
 
@@ -854,16 +921,11 @@ func (s *Store) normalizeMessageAliases(m *Message) {
 	if strings.TrimSpace(m.ReplyToMessage) == "" && strings.TrimSpace(m.ReplyToMessageID) != "" {
 		m.ReplyToMessage = strings.TrimSpace(m.ReplyToMessageID)
 	}
-	if s != nil {
-		if strings.TrimSpace(m.Author) == "" {
-			name := s.resolveAuthorNameLocked(m.AgentID)
-			if name != "" {
-				m.Author = name
-			}
-		}
-		if strings.TrimSpace(m.DisplayName) == "" {
-			m.DisplayName = m.Author
-		}
+	if strings.TrimSpace(m.Author) == "" {
+		m.Author = strings.TrimSpace(m.AgentID)
+	}
+	if strings.TrimSpace(m.DisplayName) == "" {
+		m.DisplayName = m.Author
 	}
 }
 
@@ -898,8 +960,23 @@ func (s *Store) AddMessage(m Message) error {
 		return ErrRoomNotFound
 	}
 	s.mu.RUnlock()
+	if strings.TrimSpace(m.Author) == "" {
+		s.mu.RLock()
+		m.Author = s.resolveAuthorNameLocked(m.AgentID)
+		s.mu.RUnlock()
+	}
+	if strings.TrimSpace(m.DisplayName) == "" {
+		m.DisplayName = m.Author
+	}
 
 	r.mu.Lock()
+	existingIndex := -1
+	for i := range r.Messages {
+		if r.Messages[i].ID == m.ID {
+			existingIndex = i
+			break
+		}
+	}
 	if m.ArticleID == "" {
 		if m.ReplyToMessageID != "" {
 			for i := len(r.Messages) - 1; i >= 0; i-- {
@@ -948,13 +1025,34 @@ func (s *Store) AddMessage(m Message) error {
 		}
 	}
 
-	r.Messages = append(r.Messages, m)
-	if s.maxInMemMsgs > 0 && len(r.Messages) > s.maxInMemMsgs {
-		r.Messages = r.Messages[len(r.Messages)-s.maxInMemMsgs:]
+	// Persist to the single authoritative backend before making the write
+	// visible in memory. A failed durable write must never be reported as
+	// success or leave a ghost message in the live process.
+	if s.pg != nil {
+		if err := s.pg.InsertMessage(m); err != nil {
+			r.mu.Unlock()
+			return fmt.Errorf("persist message to postgres: %w", err)
+		}
+	} else if s.persistToDisk {
+		if err := s.appendMessageToDisk(m); err != nil {
+			r.mu.Unlock()
+			return fmt.Errorf("persist message to disk: %w", err)
+		}
+	}
+
+	if existingIndex >= 0 {
+		r.sigAcc ^= computeMessageSig(r.Messages[existingIndex])
+		r.Messages[existingIndex] = m
+	} else {
+		r.Messages = append(r.Messages, m)
+		if s.maxInMemMsgs > 0 && len(r.Messages) > s.maxInMemMsgs {
+			r.Messages = r.Messages[len(r.Messages)-s.maxInMemMsgs:]
+		}
 	}
 	r.cachedSimpleArticles = nil
 	r.sigAcc ^= computeMessageSig(m)
 	r.touchLocked(now)
+	isNewMessage := existingIndex < 0
 	r.mu.Unlock()
 
 	s.mu.Lock()
@@ -963,7 +1061,9 @@ func (s *Store) AddMessage(m Message) error {
 		s.dayKey = day
 		s.dailyMsgCount = 0
 	}
-	s.dailyMsgCount++
+	if isNewMessage {
+		s.dailyMsgCount++
+	}
 
 	key := m.ProjectID + "/" + m.RoomID
 	s.roomLastMsgAt[key] = now
@@ -973,14 +1073,6 @@ func (s *Store) AddMessage(m Message) error {
 	}
 	s.mu.Unlock()
 
-	if s.persistToDisk {
-		if err := s.appendMessageToDisk(m); err != nil {
-			return err
-		}
-	}
-	if s.pg != nil {
-		_ = s.pg.InsertMessage(m)
-	}
 	s.notifyRoomListeners(m.ProjectID, m.RoomID)
 	return nil
 }
@@ -1146,6 +1238,9 @@ func (s *Store) saveRoomMetaLocked(projectID string, room *Room) error {
 	if room == nil {
 		return nil
 	}
+	if s.pg != nil {
+		return s.pg.SaveBoardMetadata(projectID, room.ID, room.Name, room.Category, room.Description, room.Owner)
+	}
 	path := s.roomMetaPath(projectID, room.ID)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -1180,9 +1275,6 @@ func (s *Store) saveRoomMetaLocked(projectID string, room *Room) error {
 	}
 	if err = tmp.Close(); err != nil {
 		return err
-	}
-	if s.pg != nil {
-		_ = s.pg.SaveBoardMetadata(projectID, room.ID, room.Name, room.Category, room.Description, room.Owner)
 	}
 	return os.Rename(tmpName, path)
 }
@@ -1795,6 +1887,7 @@ func (s *Store) UpdateArticleRoot(projectID, roomID, messageID, title, text stri
 	s.mu.RUnlock()
 
 	r.mu.Lock()
+	originalMessages := append([]Message(nil), r.Messages...)
 	var updated *Message
 	for i := range r.Messages {
 		msg := &r.Messages[i]
@@ -1832,30 +1925,25 @@ func (s *Store) UpdateArticleRoot(projectID, roomID, messageID, title, text stri
 		return nil, ErrMessageNotFound
 	}
 
+	authorName := firstNonEmpty(strings.TrimSpace(updated.DisplayName), strings.TrimSpace(updated.Author), strings.TrimSpace(updated.AgentID))
+	var persistErr error
+	if s.pg != nil {
+		persistErr = s.pg.UpdateArticleRoot(projectID, roomID, messageID, title, text, authorName, authorName)
+	} else if s.persistToDisk {
+		persistErr = s.rewriteRoomMessagesToDisk(projectID, roomID, r.Messages)
+	}
+	if persistErr != nil {
+		r.Messages = originalMessages
+		r.mu.Unlock()
+		return nil, fmt.Errorf("persist article edit: %w", persistErr)
+	}
 	r.cachedSimpleArticles = nil
 	r.sigAcc = 0
 	for _, m := range r.Messages {
 		r.sigAcc ^= computeMessageSig(m)
 	}
 	r.touchLocked(time.Now())
-	messagesSnapshot := append([]Message(nil), r.Messages...)
 	r.mu.Unlock()
-
-	authorName := ""
-	s.mu.RLock()
-	if updated != nil {
-		authorName = s.resolveAuthorNameLocked(updated.AgentID)
-	}
-	s.mu.RUnlock()
-
-	if s.persistToDisk {
-		if err := s.rewriteRoomMessagesToDisk(projectID, roomID, messagesSnapshot); err != nil {
-			return nil, err
-		}
-	}
-	if s.pg != nil && updated != nil {
-		_ = s.pg.UpdateArticleRoot(projectID, roomID, messageID, title, text, authorName, authorName)
-	}
 	s.notifyRoomListeners(projectID, roomID)
 	return updated, nil
 }
@@ -1987,6 +2075,11 @@ func (s *Store) ModeratorDeleteArticle(projectID, roomID, articleID, reason, mod
 	s.mu.RUnlock()
 
 	r.mu.Lock()
+	originalMessages := make([]Message, len(r.Messages))
+	for i := range r.Messages {
+		originalMessages[i] = r.Messages[i]
+		originalMessages[i].Meta = cloneMeta(r.Messages[i].Meta)
+	}
 	var rootMsg *Message
 	newText := fmt.Sprintf("[此文章已被版主 %s 刪除，原因: %s]", modName, reason)
 	isSoft := s.SoftDeleteEnabled()
@@ -2053,15 +2146,27 @@ func (s *Store) ModeratorDeleteArticle(projectID, roomID, articleID, reason, mod
 		r.sigAcc ^= computeMessageSig(m)
 	}
 	r.touchLocked(time.Now())
-	messagesSnapshot := append([]Message(nil), r.Messages...)
-	r.mu.Unlock()
-
-	if s.persistToDisk {
-		_ = s.rewriteRoomMessagesToDisk(projectID, roomID, messagesSnapshot)
-	}
+	var persistErr error
 	if s.pg != nil && rootMsg != nil {
-		_ = s.pg.UpdateMessageContentAndMeta(projectID, roomID, rootMsg.ID, rootMsg.Title, rootMsg.Text, rootMsg.Meta)
+		if isSoft {
+			persistErr = s.pg.UpdateMessageContentAndMeta(projectID, roomID, rootMsg.ID, rootMsg.Title, rootMsg.Text, rootMsg.Meta)
+		} else {
+			persistErr = s.pg.DeleteArticleMessages(projectID, roomID, articleID)
+		}
+	} else if s.persistToDisk {
+		persistErr = s.rewriteRoomMessagesToDisk(projectID, roomID, r.Messages)
 	}
+	if persistErr != nil {
+		r.Messages = originalMessages
+		r.cachedSimpleArticles = nil
+		r.sigAcc = 0
+		for _, m := range r.Messages {
+			r.sigAcc ^= computeMessageSig(m)
+		}
+		r.mu.Unlock()
+		return nil, fmt.Errorf("persist article deletion: %w", persistErr)
+	}
+	r.mu.Unlock()
 	s.notifyRoomListeners(projectID, roomID)
 	return rootMsg, nil
 }
@@ -2092,26 +2197,65 @@ func (s *Store) ModeratorDeleteReply(projectID, roomID, messageID, reason, modNa
 
 	r.mu.Lock()
 	var updated *Message
+	var updatedIndex = -1
+	isSoft := s.SoftDeleteEnabled()
 	newText := fmt.Sprintf("[此回覆已被版主 %s 刪除，原因: %s]", modName, reason)
 	for i := range r.Messages {
 		msg := &r.Messages[i]
 		if msg.ID != messageID {
 			continue
 		}
-		msg.Text = newText
-		if msg.Meta == nil {
-			msg.Meta = make(map[string]any)
+		articleID := strings.TrimSpace(msg.ArticleID)
+		if strings.TrimSpace(msg.ReplyToMessageID) == "" && (articleID == "" || articleID == msg.ID) {
+			r.mu.Unlock()
+			return nil, fmt.Errorf("message is an article root, not a reply")
 		}
-		msg.Meta["deleted"] = true
-		msg.Meta["deleted_by"] = modName
-		msg.Meta["delete_reason"] = reason
 		updatedCopy := *msg
+		updatedCopy.Meta = cloneMeta(msg.Meta)
 		updated = &updatedCopy
+		updatedIndex = i
 		break
 	}
 	if updated == nil {
 		r.mu.Unlock()
 		return nil, ErrMessageNotFound
+	}
+
+	if isSoft {
+		r.Messages[updatedIndex].Text = newText
+		if r.Messages[updatedIndex].Meta == nil {
+			r.Messages[updatedIndex].Meta = make(map[string]any)
+		}
+		r.Messages[updatedIndex].Meta["deleted"] = true
+		r.Messages[updatedIndex].Meta["deleted_by"] = modName
+		r.Messages[updatedIndex].Meta["delete_reason"] = reason
+		updatedCopy := r.Messages[updatedIndex]
+		updatedCopy.Meta = cloneMeta(r.Messages[updatedIndex].Meta)
+		updated = &updatedCopy
+	} else {
+		r.Messages = append(r.Messages[:updatedIndex], r.Messages[updatedIndex+1:]...)
+	}
+
+	var persistErr error
+	if s.pg != nil {
+		if isSoft {
+			persistErr = s.pg.UpdateMessageContentAndMeta(projectID, roomID, updated.ID, updated.Title, updated.Text, updated.Meta)
+		} else {
+			persistErr = s.pg.DeleteMessage(projectID, roomID, updated.ID)
+		}
+	} else if s.persistToDisk {
+		persistErr = s.rewriteRoomMessagesToDisk(projectID, roomID, r.Messages)
+	}
+	if persistErr != nil {
+		if isSoft {
+			r.Messages[updatedIndex] = *updated
+		} else {
+			r.Messages = append(r.Messages, Message{})
+			copy(r.Messages[updatedIndex+1:], r.Messages[updatedIndex:])
+			r.Messages[updatedIndex] = *updated
+		}
+		r.mu.Unlock()
+		return nil, fmt.Errorf("persist reply deletion: %w", persistErr)
 	}
 
 	r.cachedSimpleArticles = nil
@@ -2120,15 +2264,7 @@ func (s *Store) ModeratorDeleteReply(projectID, roomID, messageID, reason, modNa
 		r.sigAcc ^= computeMessageSig(m)
 	}
 	r.touchLocked(time.Now())
-	messagesSnapshot := append([]Message(nil), r.Messages...)
 	r.mu.Unlock()
-
-	if s.persistToDisk {
-		_ = s.rewriteRoomMessagesToDisk(projectID, roomID, messagesSnapshot)
-	}
-	if s.pg != nil && updated != nil {
-		_ = s.pg.UpdateMessageContentAndMeta(projectID, roomID, updated.ID, updated.Title, updated.Text, updated.Meta)
-	}
 	s.notifyRoomListeners(projectID, roomID)
 	return updated, nil
 }
@@ -2150,11 +2286,34 @@ func (s *Store) ModeratorSetArticlePinned(projectID, roomID, articleID string, p
 	s.mu.RUnlock()
 
 	r.mu.Lock()
+	rootIndex := -1
+	for i := range r.Messages {
+		msg := r.Messages[i]
+		targetArticleID := strings.TrimSpace(msg.ArticleID)
+		if targetArticleID == "" {
+			targetArticleID = msg.ID
+		}
+		if targetArticleID == articleID && strings.TrimSpace(msg.ReplyToMessageID) == "" {
+			rootIndex = i
+			break
+		}
+	}
+	if rootIndex < 0 {
+		r.mu.Unlock()
+		return nil, ErrMessageNotFound
+	}
+	currentPinned, _ := r.Messages[rootIndex].Meta["pinned"].(bool)
+	if currentPinned == pinned {
+		rootCopy := r.Messages[rootIndex]
+		rootCopy.Meta = cloneMeta(rootCopy.Meta)
+		r.mu.Unlock()
+		return &rootCopy, nil
+	}
 	if pinned {
 		pinnedCount := 0
 		for _, m := range r.Messages {
 			if strings.TrimSpace(m.ReplyToMessageID) == "" && m.Meta != nil {
-				if p, ok := m.Meta["pinned"].(bool); ok && p {
+				if value, ok := m.Meta["pinned"].(bool); ok && value {
 					pinnedCount++
 				}
 			}
@@ -2165,26 +2324,24 @@ func (s *Store) ModeratorSetArticlePinned(projectID, roomID, articleID string, p
 		}
 	}
 
-	var rootMsg *Message
-	for i := range r.Messages {
-		msg := &r.Messages[i]
-		targetArticleID := strings.TrimSpace(msg.ArticleID)
-		if targetArticleID == "" {
-			targetArticleID = msg.ID
-		}
-		if targetArticleID == articleID && strings.TrimSpace(msg.ReplyToMessageID) == "" {
-			if msg.Meta == nil {
-				msg.Meta = make(map[string]any)
-			}
-			msg.Meta["pinned"] = pinned
-			rootCopy := *msg
-			rootMsg = &rootCopy
-			break
-		}
+	originalMeta := cloneMeta(r.Messages[rootIndex].Meta)
+	if r.Messages[rootIndex].Meta == nil {
+		r.Messages[rootIndex].Meta = make(map[string]any)
 	}
-	if rootMsg == nil {
+	r.Messages[rootIndex].Meta["pinned"] = pinned
+	rootCopy := r.Messages[rootIndex]
+	rootCopy.Meta = cloneMeta(rootCopy.Meta)
+	rootMsg := &rootCopy
+	var persistErr error
+	if s.pg != nil {
+		persistErr = s.pg.UpdateMessageMeta(projectID, roomID, rootMsg.ID, rootMsg.Meta)
+	} else if s.persistToDisk {
+		persistErr = s.rewriteRoomMessagesToDisk(projectID, roomID, r.Messages)
+	}
+	if persistErr != nil {
+		r.Messages[rootIndex].Meta = originalMeta
 		r.mu.Unlock()
-		return nil, ErrMessageNotFound
+		return nil, fmt.Errorf("persist article pin state: %w", persistErr)
 	}
 
 	r.cachedSimpleArticles = nil
@@ -2193,15 +2350,7 @@ func (s *Store) ModeratorSetArticlePinned(projectID, roomID, articleID string, p
 		r.sigAcc ^= computeMessageSig(m)
 	}
 	r.touchLocked(time.Now())
-	messagesSnapshot := append([]Message(nil), r.Messages...)
 	r.mu.Unlock()
-
-	if s.persistToDisk {
-		_ = s.rewriteRoomMessagesToDisk(projectID, roomID, messagesSnapshot)
-	}
-	if s.pg != nil && rootMsg != nil {
-		_ = s.pg.UpdateMessageMeta(projectID, roomID, rootMsg.ID, rootMsg.Meta)
-	}
 	s.notifyRoomListeners(projectID, roomID)
 	return rootMsg, nil
 }
@@ -2225,6 +2374,8 @@ func (s *Store) ModeratorSetArticleLocked(projectID, roomID, articleID string, l
 
 	r.mu.Lock()
 	var rootMsg *Message
+	var rootIndex = -1
+	var originalMeta map[string]any
 	for i := range r.Messages {
 		msg := &r.Messages[i]
 		targetArticleID := strings.TrimSpace(msg.ArticleID)
@@ -2232,6 +2383,8 @@ func (s *Store) ModeratorSetArticleLocked(projectID, roomID, articleID string, l
 			targetArticleID = msg.ID
 		}
 		if targetArticleID == articleID && strings.TrimSpace(msg.ReplyToMessageID) == "" {
+			rootIndex = i
+			originalMeta = cloneMeta(msg.Meta)
 			if msg.Meta == nil {
 				msg.Meta = make(map[string]any)
 			}
@@ -2242,6 +2395,7 @@ func (s *Store) ModeratorSetArticleLocked(projectID, roomID, articleID string, l
 				delete(msg.Meta, "lock_reason")
 			}
 			rootCopy := *msg
+			rootCopy.Meta = cloneMeta(msg.Meta)
 			rootMsg = &rootCopy
 			break
 		}
@@ -2250,6 +2404,17 @@ func (s *Store) ModeratorSetArticleLocked(projectID, roomID, articleID string, l
 		r.mu.Unlock()
 		return nil, ErrMessageNotFound
 	}
+	var persistErr error
+	if s.pg != nil {
+		persistErr = s.pg.UpdateMessageMeta(projectID, roomID, rootMsg.ID, rootMsg.Meta)
+	} else if s.persistToDisk {
+		persistErr = s.rewriteRoomMessagesToDisk(projectID, roomID, r.Messages)
+	}
+	if persistErr != nil {
+		r.Messages[rootIndex].Meta = originalMeta
+		r.mu.Unlock()
+		return nil, fmt.Errorf("persist article lock state: %w", persistErr)
+	}
 
 	r.cachedSimpleArticles = nil
 	r.sigAcc = 0
@@ -2257,15 +2422,7 @@ func (s *Store) ModeratorSetArticleLocked(projectID, roomID, articleID string, l
 		r.sigAcc ^= computeMessageSig(m)
 	}
 	r.touchLocked(time.Now())
-	messagesSnapshot := append([]Message(nil), r.Messages...)
 	r.mu.Unlock()
-
-	if s.persistToDisk {
-		_ = s.rewriteRoomMessagesToDisk(projectID, roomID, messagesSnapshot)
-	}
-	if s.pg != nil && rootMsg != nil {
-		_ = s.pg.UpdateMessageMeta(projectID, roomID, rootMsg.ID, rootMsg.Meta)
-	}
 	s.notifyRoomListeners(projectID, roomID)
 	return rootMsg, nil
 }
@@ -2291,25 +2448,30 @@ func (s *Store) ModeratorUpdateBoardDesc(projectID, roomID, description, categor
 }
 
 func (s *Store) SetPresence(projectID, roomID, agentID, status string, ts time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	s.mu.RLock()
 	p, ok := s.projects[projectID]
 	if !ok {
+		s.mu.RUnlock()
 		return ErrProjectNotFound
 	}
 	r, ok := p.Rooms[roomID]
 	if !ok {
+		s.mu.RUnlock()
 		return ErrRoomNotFound
 	}
+	s.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.Presence == nil {
 		r.Presence = make(map[string]Presence)
 	}
 	previous, existed := r.Presence[agentID]
-	r.Presence[agentID] = Presence{AgentID: agentID, Status: status, LastSeen: ts}
 	if s.pg != nil {
-		_ = s.pg.SavePresence(projectID, roomID, agentID, status, ts)
+		if err := s.pg.SavePresence(projectID, roomID, agentID, status, ts); err != nil {
+			return err
+		}
 	}
+	r.Presence[agentID] = Presence{AgentID: agentID, Status: status, LastSeen: ts}
 	if s.persistToDisk {
 		if err := s.saveRoomMetaLocked(projectID, r); err != nil {
 			if existed {
@@ -2497,7 +2659,7 @@ func (s *Store) ListArticles(projectID, roomID string, opts ArticleRangeOptions)
 				Board:         msg.RoomID,
 				ArticleID:     articleID,
 				Title:         strings.TrimSpace(msg.Title),
-				Author:        firstNonEmpty(msg.DisplayName, msg.Author, s.resolveAuthorNameLocked(msg.AgentID)),
+				Author:        firstNonEmpty(msg.DisplayName, msg.Author, msg.AgentID),
 				RootMessageID: strings.TrimSpace(msg.ID),
 				StartedAt:     msg.TS,
 				UpdatedAt:     msg.TS,
@@ -2692,7 +2854,7 @@ func (s *Store) GetArticle(projectID, roomID, articleID string) (*ArticleSummary
 		ArticleID:     target,
 		Article:       target,
 		Title:         title,
-		Author:        firstNonEmpty(rootMsg.DisplayName, rootMsg.Author, s.resolveAuthorNameLocked(rootMsg.AgentID)),
+		Author:        firstNonEmpty(rootMsg.DisplayName, rootMsg.Author, rootMsg.AgentID),
 		Body:          rootMsg.Text,
 		RootMessageID: rootMsg.ID,
 		RootMessage:   rootMsg.ID,
@@ -3026,10 +3188,7 @@ func (s *Store) buildArticleSummariesFromMessages(projectID, roomID string, mess
 		}
 		acc, exists := articles[articleID]
 		if !exists {
-			authorName := strings.TrimSpace(msg.AgentID)
-			if s != nil {
-				authorName = s.resolveAuthorNameLocked(msg.AgentID)
-			}
+			authorName := firstNonEmpty(msg.DisplayName, msg.Author, msg.AgentID)
 			acc = &articleAccumulator{
 				ProjectID:     firstNonEmpty(msg.ProjectID, projectID),
 				RoomID:        firstNonEmpty(msg.RoomID, roomID),
@@ -3202,21 +3361,29 @@ func (s *Store) PruneVisitorMessages(maxAge time.Duration) (int, error) {
 			retained = append(retained, msg)
 		}
 	}
-	if prunedCount > 0 {
-		r.Messages = retained
-		r.cachedSimpleArticles = nil
-		r.sigAcc = 0
-		for _, m := range retained {
-			r.sigAcc ^= computeMessageSig(m)
-		}
-	}
-	r.mu.Unlock()
-
-	if prunedCount > 0 && s.persistToDisk {
-		_ = s.rewriteRoomMessagesOnDisk(projectID, roomID, retained)
+	if prunedCount == 0 {
+		r.mu.Unlock()
+		return 0, nil
 	}
 	if s.pg != nil {
-		_, _ = s.pg.DeleteMessagesOlderThan(projectID, roomID, cutoff)
+		persistedCount, err := s.pg.DeleteMessagesOlderThan(projectID, roomID, cutoff)
+		if err != nil {
+			r.mu.Unlock()
+			return 0, err
+		}
+		prunedCount = int(persistedCount)
+	} else if s.persistToDisk {
+		if err := s.rewriteRoomMessagesOnDisk(projectID, roomID, retained); err != nil {
+			r.mu.Unlock()
+			return 0, err
+		}
 	}
+	r.Messages = retained
+	r.cachedSimpleArticles = nil
+	r.sigAcc = 0
+	for _, m := range retained {
+		r.sigAcc ^= computeMessageSig(m)
+	}
+	r.mu.Unlock()
 	return prunedCount, nil
 }

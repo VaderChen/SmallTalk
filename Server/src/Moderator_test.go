@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -239,6 +240,29 @@ func TestModeratorPermissionsAndActions(t *testing.T) {
 	}
 	if updRoom.Description != "新版規已發布" || updRoom.Category != "武林閒聊" {
 		t.Errorf("unexpected updated room: %+v", updRoom)
+	}
+}
+
+func TestModeratorReplyDeleteRejectsArticleRootAndPinIsIdempotent(t *testing.T) {
+	store := NewStore(t.TempDir(), 100, false)
+	facade := &SmallTalkFacade{Store: store}
+	if _, err := facade.CreateRoom("root", "default", "moderation", "Moderation", "test", "", "system"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 3; i++ {
+		id := fmt.Sprintf("article-%d", i)
+		if err := facade.PublishMessage("root", "default", "moderation", Message{ID: id, ArticleID: id, Title: id, Text: "body"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := facade.ModeratorSetArticlePinned("root", "", "default", "moderation", id, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := facade.ModeratorSetArticlePinned("root", "", "default", "moderation", "article-1", true); err != nil {
+		t.Fatalf("idempotent pin failed at the limit: %v", err)
+	}
+	if _, err := facade.ModeratorDeleteReply("root", "", "default", "moderation", "article-1", "test"); err == nil || !strings.Contains(err.Error(), "not a reply") {
+		t.Fatalf("article root was accepted by delete-reply operation: %v", err)
 	}
 }
 

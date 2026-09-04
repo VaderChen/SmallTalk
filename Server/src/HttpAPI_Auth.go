@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MarsSemi/MarsCloud-SaaS/SDK/MarsClient"
@@ -16,6 +17,7 @@ import (
 )
 
 type HttpAPI_auth struct {
+	marsClientMu    sync.RWMutex
 	MarsCloudURL    string
 	DefaultAccount  string
 	DefaultPassword string
@@ -23,6 +25,24 @@ type HttpAPI_auth struct {
 	WebEntryPath    string
 	MarsClient      *MarsClient.MarsClient
 	Store           *Store
+}
+
+func (h *HttpAPI_auth) setMarsClient(client *MarsClient.MarsClient) {
+	if h == nil {
+		return
+	}
+	h.marsClientMu.Lock()
+	h.MarsClient = client
+	h.marsClientMu.Unlock()
+}
+
+func (h *HttpAPI_auth) getMarsClient() *MarsClient.MarsClient {
+	if h == nil {
+		return nil
+	}
+	h.marsClientMu.RLock()
+	defer h.marsClientMu.RUnlock()
+	return h.MarsClient
 }
 
 const loginSessionTTLSec = 24 * 60 * 60
@@ -122,7 +142,7 @@ func (h *HttpAPI_auth) handleLogin(w http.ResponseWriter, r *http.Request, body 
 		return mustJSON(ErrorResponse{Error: "post required"})
 	}
 
-	sourceIP := sourceIPOf(r)
+	sourceIP := sourceIPOfWithStore(r, h.Store)
 	if h.Store != nil && h.Store.AuthRateLimiter != nil && sourceIP != "" {
 		if blocked, wait := h.Store.AuthRateLimiter.IsBlocked(sourceIP); blocked {
 			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(wait.Seconds())+1))
@@ -181,14 +201,16 @@ func (h *HttpAPI_auth) handleLogin(w http.ResponseWriter, r *http.Request, body 
 		return mustJSON(ErrorResponse{Error: "create session failed"})
 	}
 	if h.Store != nil {
-		_, _ = h.Store.UpsertAuthToken(AuthTokenRecord{
+		if _, err := h.Store.UpsertAuthToken(AuthTokenRecord{
 			Token:     sessionToken,
 			ClientID:  req.Account,
 			Kind:      "session-human",
 			SourceIP:  sourceIP,
 			IssuedAt:  time.Now().Format(time.RFC3339Nano),
 			ExpiresAt: time.Now().Add(24 * time.Hour).Format(time.RFC3339Nano),
-		}, true)
+		}, true); err != nil {
+			return mustJSON(ErrorResponse{Error: "persist session failed"})
+		}
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -241,6 +263,10 @@ func (h *HttpAPI_auth) handleLogout(w http.ResponseWriter, r *http.Request) []by
 	if r.Method != http.MethodPost {
 		return mustJSON(ErrorResponse{Error: "method not allowed"})
 	}
+	var revokeErr error
+	if cookie, err := r.Cookie("smalltalk_auth_token"); err == nil && h.Store != nil {
+		revokeErr = h.Store.DeleteAuthToken(cookie.Value)
+	}
 	secure := requestUsesHTTPS(r, h.Store)
 	for _, cookie := range []http.Cookie{
 		{Name: "smalltalk_auth_token", Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: -1},
@@ -250,6 +276,9 @@ func (h *HttpAPI_auth) handleLogout(w http.ResponseWriter, r *http.Request) []by
 	} {
 		cookie := cookie
 		http.SetCookie(w, &cookie)
+	}
+	if revokeErr != nil {
+		return mustJSON(ErrorResponse{Error: "logout token revocation failed"})
 	}
 	return mustJSON(map[string]any{"ok": true})
 }
@@ -287,7 +316,7 @@ func (h *HttpAPI_auth) handleDevRegister(r *http.Request, body string, isPOST bo
 	}
 
 	// Protect against short-term registration flooding from same source (IP or MAC)
-	sourceIP := sourceIPOf(r)
+	sourceIP := sourceIPOfWithStore(r, h.Store)
 	if h.Store != nil && h.Store.RegRateLimiter != nil {
 		if sourceIP != "" {
 			if allowed, wait := h.Store.RegRateLimiter.CheckAndRecord("ip:" + sourceIP); !allowed {
@@ -356,7 +385,7 @@ func (h *HttpAPI_auth) handleDevLogin(r *http.Request, body string, isPOST bool)
 		})
 	}
 
-	sourceIP := sourceIPOf(r)
+	sourceIP := sourceIPOfWithStore(r, h.Store)
 	if h.Store.AuthRateLimiter != nil && sourceIP != "" {
 		if blocked, wait := h.Store.AuthRateLimiter.IsBlocked(sourceIP); blocked {
 			return mustJSON(DevLoginResponse{
@@ -578,7 +607,8 @@ func (h *HttpAPI_auth) listProjects() []AuthProjectOption {
 }
 
 func (h *HttpAPI_auth) fetchProjectsFromMarsCloud() []AuthProjectOption {
-	if h.MarsClient == nil || strings.TrimSpace(h.MarsClient.AuthToken) == "" {
+	client := h.getMarsClient()
+	if client == nil || strings.TrimSpace(client.AuthToken) == "" {
 		return nil
 	}
 
@@ -593,7 +623,7 @@ func (h *HttpAPI_auth) fetchProjectsFromMarsCloud() []AuthProjectOption {
 	}
 
 	for _, api := range candidates {
-		resp := strings.TrimSpace(h.MarsClient.CallAPI(api, "{}", 5000))
+		resp := strings.TrimSpace(client.CallAPI(api, "{}", 5000))
 		if resp == "" {
 			continue
 		}

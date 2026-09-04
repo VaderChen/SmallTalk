@@ -99,6 +99,58 @@ func TestPostgresPerBoardTableIntegration(t *testing.T) {
 	}
 }
 
+func TestPostgresHardDeleteAndBoardDeleteAreDurable(t *testing.T) {
+	pg, err := ConnectLocalPostgres()
+	if err != nil {
+		t.Skipf("Skipping Postgres integration test: %v", err)
+	}
+	defer pg.Close()
+	roomID := fmt.Sprintf("flow_delete_%d", time.Now().UnixNano()%100000000)
+	defer pg.DeleteBoard("default", roomID)
+	store, err := NewStoreWithPostgres(pg, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facade := &SmallTalkFacade{Store: store}
+	if _, err := facade.CreateRoom("root", "default", roomID, "Flow delete", "test", "", "system"); err != nil {
+		t.Fatal(err)
+	}
+	store.systemPolicyMu.Lock()
+	store.softDeleteEnabled = false
+	store.systemPolicyLoaded = true
+	store.systemPolicyMu.Unlock()
+	if err := facade.PublishMessage("root", "default", roomID, Message{ID: "root-message", ArticleID: "root-message", Title: "title", Text: "body"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := facade.PublishMessage("root", "default", roomID, Message{ID: "reply-message", ArticleID: "root-message", ReplyToMessageID: "root-message", Text: "reply"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := facade.ModeratorDeleteArticle("root", "", "default", roomID, "root-message", "test"); err != nil {
+		t.Fatal(err)
+	}
+	tableName := pg.SanitizeTableName("default", roomID)
+	var count int
+	if err := pg.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE article_id = 'root-message' OR id = 'root-message'`, tableName)).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("hard-deleted article still has %d postgres rows", count)
+	}
+	if err := facade.PublishMessage("root", "default", roomID, Message{ID: "before-board-delete", ArticleID: "before-board-delete", Title: "title", Text: "body"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := facade.DeleteRoom("root", "default", roomID); err != nil {
+		t.Fatal(err)
+	}
+	var tableExists bool
+	if err := pg.db.QueryRow(`SELECT to_regclass($1) IS NOT NULL`, tableName).Scan(&tableExists); err != nil {
+		t.Fatal(err)
+	}
+	if tableExists {
+		t.Fatal("deleted board message table still exists")
+	}
+}
+
 func TestStoreWithPostgresSync(t *testing.T) {
 	pg, err := ConnectLocalPostgres()
 	if err != nil {
@@ -304,4 +356,3 @@ func TestAuthorizeAuthTokenAgentKindAndPostgres(t *testing.T) {
 		t.Fatalf("Unexpected context: %+v", ctx)
 	}
 }
-

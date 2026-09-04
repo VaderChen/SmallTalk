@@ -70,13 +70,25 @@
     }
 
     .tableHead {
+      height: 28px;
       min-height: 28px;
-      padding: 2px 10px;
+      padding: 0 10px;
       background: var(--header);
       color: #000000;
       display: grid;
       align-items: center;
       font-weight: 700;
+      white-space: nowrap;
+      line-height: 1.55;
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .tableHead > div {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
     }
 
     .view {
@@ -174,7 +186,7 @@
 
     .threadHead,
     .threadRow {
-      grid-template-columns: 22px 60px 100px 140px minmax(140px, 1fr) 60px 56px;
+      grid-template-columns: 22px 60px 100px 140px minmax(140px, 1fr) 64px 64px;
       column-gap: 8px;
     }
 
@@ -191,11 +203,13 @@
     .threadHead > :nth-child(6),
     .threadRow > :nth-child(6) {
       text-align: center;
+      padding: 0 2px;
     }
 
     .threadHead > :nth-child(7),
     .threadRow > :nth-child(7) {
       text-align: center;
+      padding: 0 2px;
     }
 
     .boardName,

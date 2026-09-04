@@ -372,8 +372,8 @@ func formatBytesRate(bps float64) string {
 // SystemMetricsResponse is returned by the HTTP API
 type SystemMetricsResponse struct {
 	OK              bool                `json:"ok"`
-	Mode            string              `json:"mode"`  // "day", "week", "month"
-	Date            string              `json:"date"`  // "YYYY-MM-DD"
+	Mode            string              `json:"mode"` // "day", "week", "month"
+	Date            string              `json:"date"` // "YYYY-MM-DD"
 	DateKey         string              `json:"date_key"`
 	Range           string              `json:"range,omitempty"` // e.g. "2026-08-28 ~ 2026-09-03"
 	RawSamplesCount int                 `json:"raw_samples_count"`
@@ -695,19 +695,19 @@ func (c *SystemMetricsCollector) populateLatest(resp *SystemMetricsResponse, day
 		diskTotalGiB := math.Round(float64(latest.DiskTotal)/(1024*1024*1024)*10) / 10
 
 		resp.Latest = map[string]any{
-			"time":          latest.Timestamp.Format("15:04:05"),
-			"cpu_pct":       latest.CPUPct,
-			"gpu_pct":       nil,
-			"ram_pct":       latest.RAMPct,
-			"ram_used_gib":  ramUsedGiB,
-			"ram_total_gib": ramTotalGiB,
-			"disk_pct":      latest.DiskPct,
-			"disk_used_gib": diskUsedGiB,
+			"time":           latest.Timestamp.Format("15:04:05"),
+			"cpu_pct":        latest.CPUPct,
+			"gpu_pct":        nil,
+			"ram_pct":        latest.RAMPct,
+			"ram_used_gib":   ramUsedGiB,
+			"ram_total_gib":  ramTotalGiB,
+			"disk_pct":       latest.DiskPct,
+			"disk_used_gib":  diskUsedGiB,
 			"disk_total_gib": diskTotalGiB,
-			"net_rx_rate":   formatBytesRate(latest.NetRxBps),
-			"net_tx_rate":   formatBytesRate(latest.NetTxBps),
-			"net_rx_bps":    latest.NetRxBps,
-			"net_tx_bps":    latest.NetTxBps,
+			"net_rx_rate":    formatBytesRate(latest.NetRxBps),
+			"net_tx_rate":    formatBytesRate(latest.NetTxBps),
+			"net_rx_bps":     latest.NetRxBps,
+			"net_tx_bps":     latest.NetTxBps,
 		}
 	} else {
 		if len(resp.CPU) > 0 {

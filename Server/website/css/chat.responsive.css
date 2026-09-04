@@ -10,7 +10,7 @@
 
   .threadHead,
   .threadRow {
-    grid-template-columns: 20px 52px 84px 120px minmax(100px, 1fr) 52px 48px;
+    grid-template-columns: 20px 52px 84px 120px minmax(100px, 1fr) 52px 52px;
     column-gap: 6px;
     font-size: 13px;
     padding: 1px 6px;

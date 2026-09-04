@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -78,7 +79,13 @@ func (s *Store) LoadAdminPassword() error {
 	if s.pg != nil {
 		val, err := s.pg.GetSystemConfig("admin_password")
 		if err == nil && len(val) > 0 {
-			raw := strings.TrimSpace(string(val))
+			raw := ""
+			if jsonErr := json.Unmarshal(val, &raw); jsonErr != nil {
+				raw = strings.TrimSpace(string(val))
+			}
+			if decoded, decodeErr := base64.StdEncoding.DecodeString(raw); decodeErr == nil && len(decoded) > 0 {
+				raw = strings.TrimSpace(string(decoded))
+			}
 			pwd, hashErr := hashAdminPassword(raw)
 			if hashErr != nil {
 				return hashErr
@@ -88,7 +95,9 @@ func (s *Store) LoadAdminPassword() error {
 				s.adminPassword = pwd
 				s.adminPasswordMu.Unlock()
 				if pwd != raw {
-					_ = s.pg.SetSystemConfig("admin_password", []byte(pwd))
+					if err := s.pg.SetSystemConfig("admin_password", pwd); err != nil {
+						return err
+					}
 				}
 				return nil
 			}
@@ -132,21 +141,26 @@ func (s *Store) SetAdminPassword(newPwd string) error {
 		return fmt.Errorf("密碼雜湊失敗: %w", err)
 	}
 
-	s.adminPasswordMu.Lock()
-	s.adminPassword = hash
-	s.adminPasswordMu.Unlock()
-
 	// 1. PostgreSQL if available
 	if s.pg != nil {
-		_ = s.pg.SetSystemConfig("admin_password", []byte(hash))
+		if err := s.pg.SetSystemConfig("admin_password", hash); err != nil {
+			return fmt.Errorf("儲存管理員密碼失敗: %w", err)
+		}
 	}
 
 	// 2. Disk file
 	if s.dataDir != "" {
-		_ = os.MkdirAll(s.dataDir, 0755)
+		if err := os.MkdirAll(s.dataDir, 0755); err != nil {
+			return fmt.Errorf("建立密碼資料目錄失敗: %w", err)
+		}
 		pwdFile := filepath.Join(s.dataDir, "admin_password.txt")
-		_ = writePrivateFile(pwdFile, []byte(hash))
+		if err := writePrivateFile(pwdFile, []byte(hash)); err != nil {
+			return fmt.Errorf("儲存管理員密碼失敗: %w", err)
+		}
 	}
+	s.adminPasswordMu.Lock()
+	s.adminPassword = hash
+	s.adminPasswordMu.Unlock()
 	clearAgentPropertiesPassword()
 
 	return nil

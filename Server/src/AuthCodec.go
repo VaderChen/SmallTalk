@@ -1,11 +1,13 @@
 package main
 
 import (
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -48,7 +50,7 @@ func encodeAuthToken(clientID, purpose string, ttlSec int) (string, time.Time, t
 		ttlSec = defaultClientTokenTTLSec
 	}
 
-	pubKey, _, err := exportCurrentRSAKeys()
+	_, priKey, err := exportCurrentRSAKeys()
 	if err != nil {
 		return "", time.Time{}, time.Time{}, err
 	}
@@ -61,12 +63,16 @@ func encodeAuthToken(clientID, purpose string, ttlSec int) (string, time.Time, t
 		IssuedAt: now.Unix(),
 		ExpireAt: exp.Unix(),
 	}
-	plain := []byte(compactAuthPayload(payload))
-	cipherText, err := encryptWithCurrentRSA(pubKey, plain)
+	plain, err := json.Marshal(payload)
 	if err != nil {
 		return "", time.Time{}, time.Time{}, err
 	}
-	return base64.RawURLEncoding.EncodeToString(cipherText), now, exp, nil
+	digest := sha256.Sum256(plain)
+	signature, err := rsa.SignPSS(rand.Reader, priKey, crypto.SHA256, digest[:], nil)
+	if err != nil {
+		return "", time.Time{}, time.Time{}, err
+	}
+	return "v3." + base64.RawURLEncoding.EncodeToString(plain) + "." + base64.RawURLEncoding.EncodeToString(signature), now, exp, nil
 }
 
 func decodeClientAuthToken(token string) (*clientAuthPayload, error) {
@@ -74,11 +80,37 @@ func decodeClientAuthToken(token string) (*clientAuthPayload, error) {
 		return nil, errors.New("missing token")
 	}
 
-	_, priKey, err := exportCurrentRSAKeys()
+	pubKey, priKey, err := exportCurrentRSAKeys()
 	if err != nil {
 		return nil, err
 	}
+	if strings.HasPrefix(token, "v3.") {
+		parts := strings.Split(token, ".")
+		if len(parts) != 3 || parts[0] != "v3" {
+			return nil, errors.New("invalid signed auth token")
+		}
+		plain, err := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil {
+			return nil, err
+		}
+		signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+		if err != nil {
+			return nil, err
+		}
+		digest := sha256.Sum256(plain)
+		if err := rsa.VerifyPSS(pubKey, crypto.SHA256, digest[:], signature, nil); err != nil {
+			return nil, errors.New("invalid auth token signature")
+		}
+		var payload clientAuthPayload
+		if err := json.Unmarshal(plain, &payload); err != nil {
+			return nil, err
+		}
+		return &payload, nil
+	}
 
+	// Legacy v1/v2 credentials were RSA-encrypted rather than signed. They are
+	// accepted only while an exact server-side token record remains active; the
+	// authorization guard never treats successful decryption as authorization.
 	cipherText, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {
 		return nil, err

@@ -10,7 +10,7 @@ ICON_PATH="$PROJECT_ROOT/assets/app-icon.icns"
 RELEASE_VERSION="${SMALLTALK_VERSION:-}"
 
 if [[ -z "$RELEASE_VERSION" ]]; then
-	RELEASE_VERSION="$(TZ=Asia/Taipei date '+1.%y.%m%d build %H%M')"
+	RELEASE_VERSION="$(TZ=Asia/Taipei date '+0.%y.%m%d build %H%M')"
 fi
 
 version_core="$(echo "$RELEASE_VERSION" | awk '{print $1}')"

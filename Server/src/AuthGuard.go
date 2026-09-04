@@ -71,7 +71,15 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 					if !strings.EqualFold(strings.TrimSpace(payload.ClientID), strings.TrimSpace(record.ClientID)) {
 						continue
 					}
-					if payload.ExpireAt > 0 && payload.ExpireAt < time.Now().Unix() {
+					nowUnix := time.Now().Unix()
+					if payload.ExpireAt <= payload.IssuedAt || payload.ExpireAt < nowUnix || payload.IssuedAt > nowUnix+300 {
+						continue
+					}
+					expectedPurpose := "smalltalk-client-auth"
+					if strings.EqualFold(strings.TrimSpace(record.Kind), "session-human") {
+						expectedPurpose = "smalltalk-session-auth"
+					}
+					if payload.Purpose != expectedPurpose {
 						continue
 					}
 					principalType := "human"
@@ -106,33 +114,10 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 			}
 		}
 
-		payload, err := decodeClientAuthToken(token)
-		if err != nil || payload == nil {
-			continue
-		}
-		if payload.Purpose != "smalltalk-client-auth" && payload.Purpose != "smalltalk-session-auth" {
-			continue
-		}
-		if payload.ExpireAt > 0 && payload.ExpireAt < time.Now().Unix() {
-			continue
-		}
-		clientID := strings.TrimSpace(payload.ClientID)
-		if clientID == "" {
-			continue
-		}
-		principalType := "agent"
-		if payload.Purpose == "smalltalk-session-auth" {
-			principalType = "human"
-		}
-		if strings.EqualFold(clientID, "root") || isAgentAdmin(store, clientID) {
-			principalType = "root"
-		}
-		return &requestAuthContext{
-			Kind:          "smalltalk-codec",
-			PrincipalType: principalType,
-			ClientID:      clientID,
-			SourceIP:      sourceIP,
-		}, true
+		// A decryptable or correctly signed payload is not sufficient by itself:
+		// the exact token must also be active in the authoritative token store.
+		// This makes rotation, revocation, blocking and registry deletion effective.
+		continue
 	}
 
 	return nil, false
@@ -178,11 +163,19 @@ func hasHeaderCredential(r *http.Request) bool {
 }
 
 func isSafeCookieMutation(r *http.Request, store *Store) bool {
-	if r == nil || r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions || hasHeaderCredential(r) {
+	if r == nil || r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
 		return true
 	}
 	if _, err := r.Cookie("smalltalk_auth_token"); err != nil {
 		return true
+	}
+	if hasHeaderCredential(r) {
+		headerOnly := r.Clone(r.Context())
+		headerOnly.Header = r.Header.Clone()
+		headerOnly.Header.Del("Cookie")
+		if _, ok := requireAuthorizedRequest(headerOnly, nil, store); ok {
+			return true
+		}
 	}
 	rawOrigin := strings.TrimSpace(r.Header.Get("Origin"))
 	if rawOrigin == "" {

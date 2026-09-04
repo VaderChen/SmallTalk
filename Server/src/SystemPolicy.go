@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -28,13 +30,29 @@ func (s *Store) LoadSystemPolicy() error {
 	// 1. Try PostgreSQL if available
 	if s.pg != nil {
 		val, err := s.pg.GetSystemConfig("system_policy")
-		if err == nil && len(val) > 0 {
-			var config SystemPolicyConfig
-			if err := json.Unmarshal(val, &config); err == nil {
-				s.applySystemPolicyConfigLocked(config)
-				return nil
+		if err != nil {
+			return err
+		}
+		config := SystemPolicyConfig{VisitorTTLDays: 15, VisitorTTLEnabled: true, SoftDeleteEnabled: true}
+		legacyEncoded := false
+		if len(val) > 0 {
+			if err := json.Unmarshal(val, &config); err != nil {
+				var legacy string
+				if legacyErr := json.Unmarshal(val, &legacy); legacyErr != nil {
+					return fmt.Errorf("decode postgres system policy: %w", err)
+				}
+				decoded, decodeErr := base64.StdEncoding.DecodeString(legacy)
+				if decodeErr != nil || json.Unmarshal(decoded, &config) != nil {
+					return fmt.Errorf("decode postgres system policy: %w", err)
+				}
+				legacyEncoded = true
 			}
 		}
+		s.applySystemPolicyConfigLocked(config)
+		if len(val) == 0 || legacyEncoded {
+			return s.SaveSystemPolicy()
+		}
+		return nil
 	}
 
 	// 2. Try Disk file
@@ -85,7 +103,7 @@ func (s *Store) SaveSystemPolicy() error {
 
 	// 1. Save to PostgreSQL if available
 	if s.pg != nil {
-		_ = s.pg.SetSystemConfig("system_policy", b)
+		return s.pg.SetSystemConfig("system_policy", cfg)
 	}
 
 	// 2. Save to Disk file
@@ -131,6 +149,7 @@ func (s *Store) SetSystemPolicy(cfg SystemPolicyConfig) error {
 	if cfg.VisitorTTLDays <= 0 {
 		cfg.VisitorTTLDays = 15
 	}
+	previous := s.GetSystemPolicy()
 	s.systemPolicyMu.Lock()
 	s.visitorTTLDays = cfg.VisitorTTLDays
 	s.visitorTTLEnabled = cfg.VisitorTTLEnabled
@@ -138,7 +157,11 @@ func (s *Store) SetSystemPolicy(cfg SystemPolicyConfig) error {
 	s.systemPolicyLoaded = true
 	s.systemPolicyMu.Unlock()
 
-	return s.SaveSystemPolicy()
+	if err := s.SaveSystemPolicy(); err != nil {
+		s.applySystemPolicyConfigLocked(previous)
+		return err
+	}
+	return nil
 }
 
 func (s *Store) VisitorTTL() time.Duration {

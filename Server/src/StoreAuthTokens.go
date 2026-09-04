@@ -83,7 +83,10 @@ func (s *Store) SaveAuthTokens() error {
 		s.mu.RLock()
 		for _, item := range s.authTokens {
 			if item != nil {
-				_ = s.pg.SaveAuthToken(item)
+				if err := s.pg.SaveAuthToken(item); err != nil {
+					s.mu.RUnlock()
+					return err
+				}
 			}
 		}
 		s.mu.RUnlock()
@@ -120,6 +123,11 @@ func (s *Store) UpsertAuthToken(record AuthTokenRecord, replaceUnique bool) (Aut
 	if record.IssuedAt == "" {
 		record.IssuedAt = time.Now().Format(time.RFC3339Nano)
 	}
+	if replaceUnique && s.pg != nil {
+		if err := s.pg.DeleteAuthTokensForClientKind(record.ClientID, record.Kind); err != nil {
+			return AuthTokenRecord{}, err
+		}
+	}
 
 	s.mu.Lock()
 	if s.authTokens == nil {
@@ -138,10 +146,6 @@ func (s *Store) UpsertAuthToken(record AuthTokenRecord, replaceUnique bool) (Aut
 	cp := record
 	s.authTokens[record.Token] = &cp
 	s.mu.Unlock()
-
-	if replaceUnique && s.pg != nil {
-		_ = s.pg.DeleteAuthTokensForClientKind(record.ClientID, record.Kind)
-	}
 
 	return record, s.SaveAuthTokens()
 }
@@ -200,8 +204,9 @@ func (s *Store) AuthorizeAuthToken(token, sourceIP string) (AuthTokenRecord, boo
 	}
 
 	var (
-		out     AuthTokenRecord
-		changed bool
+		out             AuthTokenRecord
+		changed         bool
+		registryChanged bool
 	)
 
 	s.mu.Lock()
@@ -249,7 +254,7 @@ func (s *Store) AuthorizeAuthToken(token, sourceIP string) (AuthTokenRecord, boo
 	if isAuthTokenExpired(item.ExpiresAt, time.Now()) {
 		delete(s.authTokens, token)
 		s.mu.Unlock()
-		_ = s.SaveAuthTokens()
+		_ = s.DeleteAuthToken(token)
 		return AuthTokenRecord{}, false
 	}
 
@@ -265,7 +270,12 @@ func (s *Store) AuthorizeAuthToken(token, sourceIP string) (AuthTokenRecord, boo
 			s.mu.Unlock()
 			return AuthTokenRecord{}, false
 		}
-		entry.LastSeenAt = time.Now().Format(time.RFC3339)
+		now := time.Now()
+		lastSeen, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.LastSeenAt))
+		if parseErr != nil || now.Sub(lastSeen) >= time.Minute {
+			entry.LastSeenAt = now.Format(time.RFC3339Nano)
+			registryChanged = true
+		}
 	}
 
 	// 5. Source IP matching & Recording
@@ -298,7 +308,14 @@ func (s *Store) AuthorizeAuthToken(token, sourceIP string) (AuthTokenRecord, boo
 	s.mu.Unlock()
 
 	if changed {
-		_ = s.SaveAuthTokens()
+		if err := s.SaveAuthTokens(); err != nil {
+			return AuthTokenRecord{}, false
+		}
+	}
+	if registryChanged {
+		if err := s.SaveRegistry(); err != nil {
+			return AuthTokenRecord{}, false
+		}
 	}
 	return out, true
 }
@@ -330,6 +347,11 @@ func (s *Store) DeleteAuthTokensForClientKind(clientID, kind string) error {
 	if clientID == "" || kind == "" {
 		return nil
 	}
+	if s.pg != nil {
+		if err := s.pg.DeleteAuthTokensForClientKind(clientID, kind); err != nil {
+			return err
+		}
+	}
 	s.mu.Lock()
 	for token, item := range s.authTokens {
 		if item == nil {
@@ -339,6 +361,22 @@ func (s *Store) DeleteAuthTokensForClientKind(clientID, kind string) error {
 			delete(s.authTokens, token)
 		}
 	}
+	s.mu.Unlock()
+	return s.SaveAuthTokens()
+}
+
+func (s *Store) DeleteAuthToken(token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" || s == nil {
+		return nil
+	}
+	if s.pg != nil {
+		if err := s.pg.DeleteAuthToken(token); err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
+	delete(s.authTokens, token)
 	s.mu.Unlock()
 	return s.SaveAuthTokens()
 }

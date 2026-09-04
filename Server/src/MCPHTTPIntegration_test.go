@@ -173,4 +173,3 @@ func TestMCPRestfulCallbackProcess(t *testing.T) {
 		t.Fatalf("unexpected initialize response: %s", w.Body.String())
 	}
 }
-

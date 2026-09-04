@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MarsSemi/MarsCloud-SaaS/SDK/HttpService"
@@ -25,7 +26,7 @@ const (
 )
 
 func RunService() {
-	cloud := &SmallTalkService{Counter: 0}
+	cloud := &SmallTalkService{processStop: make(chan struct{})}
 	service := MarsService.Create("agent.properties", cloud)
 	marsCloudURL := service.Property.OptString("mars_cloud_url", "")
 	defaultAccount := service.Property.OptString("default_Account", "root")
@@ -120,13 +121,24 @@ func RunService() {
 	service.RegistryServerInfo(GetVersionTag(), "pack", true)
 	cloud.MCPListeners = startMCPListeners(store, mcpHTTPPort, mcpHTTPSPort, service.Property.OptString("ssl_key", ""), service.Property.OptString("ssl_key_file", ""))
 	service.Start()
+	shutdown := make(chan struct{})
+	var shutdownOnce sync.Once
+	cloud.stopWorkers = append(cloud.stopWorkers, func() {
+		shutdownOnce.Do(func() { close(shutdown) })
+	})
 	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
 		for {
-			if service.MarsClient != nil {
-				authAPI.MarsClient = service.MarsClient
+			select {
+			case <-shutdown:
 				return
+			case <-ticker.C:
+				if service.MarsClient != nil {
+					authAPI.setMarsClient(service.MarsClient)
+					return
+				}
 			}
-			time.Sleep(100 * time.Millisecond)
 		}
 	}()
 
@@ -138,17 +150,24 @@ func RunService() {
 				return
 			}
 			ttl := store.VisitorTTL()
-			if count, err := store.PruneVisitorMessages(ttl); err == nil && count > 0 {
+			if count, err := store.PruneVisitorMessages(ttl); err != nil {
+				Tools.Log.Print(Tools.LL_Error, "Prune expired visitor messages failed (%s): %v", reason, err)
+			} else if count > 0 {
 				Tools.Log.Print(Tools.LL_Info, "Pruned %d expired messages from visitors room (%s, TTL: %v)", count, reason, ttl)
 			}
 		}
 		pruneVisitors("on startup")
-		for range ticker.C {
-			pruneVisitors("hourly cycle")
+		for {
+			select {
+			case <-shutdown:
+				return
+			case <-ticker.C:
+				pruneVisitors("hourly cycle")
+			}
 		}
 	}()
 
-	select {}
+	<-shutdown
 }
 
 func propertyStrings(property *MarsJSON.JSONObject, key string) []string {
@@ -182,7 +201,9 @@ func ensureDefaultLobby(store *Store) {
 		return
 	}
 	if _, err := store.CreateRoom(defaultLobbyProjectID, "visitors", "訪客專區/Guest", "公開", "【訪客專區】開放所有人與訪客免登入自由留言，所有留言將於 15 天後自動清除。", "system"); err != nil && err == ErrAlreadyExists {
-		_, _ = store.UpdateRoom(defaultLobbyProjectID, "visitors", "訪客專區/Guest", "公開", "【訪客專區】開放所有人與訪客免登入自由留言，所有留言將於 15 天後自動清除。", "system")
+		if _, updateErr := store.UpdateRoom(defaultLobbyProjectID, "visitors", "訪客專區/Guest", "公開", "【訪客專區】開放所有人與訪客免登入自由留言，所有留言將於 15 天後自動清除。", "system"); updateErr != nil {
+			Tools.Log.Print(Tools.LL_Error, "update visitors room error: %v", updateErr)
+		}
 	} else if err != nil {
 		Tools.Log.Print(Tools.LL_Error, "ensure visitors room error: %v", err)
 	}
@@ -192,7 +213,10 @@ func ensureDefaultLobby(store *Store) {
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	ensureServerWorkingDir()
+	if err := ensureServerWorkingDir(); err != nil {
+		fmt.Fprintf(os.Stderr, "SmallTalk startup failed: %v\n", err)
+		return
+	}
 
 	Tools.EnableUncaughtExceptionHandler("SmallTalk Service", 3, func() {
 		Tools.Log.Print(Tools.LL_Error, "System Error")
@@ -202,16 +226,19 @@ func main() {
 	RunService()
 }
 
-func ensureServerWorkingDir() {
+func ensureServerWorkingDir() error {
 	target := detectServerDir()
 	if target == "" {
-		return
+		return nil
 	}
 	current, err := os.Getwd()
 	if err == nil && samePath(current, target) {
-		return
+		return nil
 	}
-	_ = os.Chdir(target)
+	if err := os.Chdir(target); err != nil {
+		return fmt.Errorf("cannot change working directory to %s: %w", target, err)
+	}
+	return nil
 }
 
 func detectServerDir() string {

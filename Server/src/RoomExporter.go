@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Tools"
 )
 
 type RoomSnapshot struct {
+	ProjectID  string    `json:"project_id"`
+	RoomID     string    `json:"room_id"`
 	Board      string    `json:"board"`
 	ExportedAt time.Time `json:"exported_at"`
 	Messages   []Message `json:"messages"`
@@ -27,6 +30,7 @@ func StartRoomSnapshotter(store *Store, outDir string, interval time.Duration) f
 	_ = os.MkdirAll(outDir, 0755)
 
 	stop := make(chan struct{})
+	var stopOnce sync.Once
 	go func() {
 		// First tick after interval to avoid spamming on boot.
 		ticker := time.NewTicker(interval)
@@ -48,16 +52,18 @@ func StartRoomSnapshotter(store *Store, outDir string, interval time.Duration) f
 	}()
 
 	Tools.Log.Print(Tools.LL_Info, "Room snapshotter enabled: interval=%s dir=%s", interval.String(), outDir)
-	return func() { close(stop) }
+	return func() { stopOnce.Do(func() { close(stop) }) }
 }
 
 func writeRoomSnapshot(outDir string, snap RoomSnapshot) error {
-	if err := os.MkdirAll(outDir, 0755); err != nil {
+	projectDir := filepath.Join(outDir, safeStorageComponent(firstNonEmpty(snap.ProjectID, "default")))
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		return err
 	}
 
-	finalPath := filepath.Join(outDir, fmt.Sprintf("%s.json", snap.Board))
-	tmp, err := os.CreateTemp(outDir, snap.Board+".tmp.*.json")
+	fileKey := safeStorageComponent(firstNonEmpty(snap.RoomID, snap.Board))
+	finalPath := filepath.Join(projectDir, fmt.Sprintf("%s.json", fileKey))
+	tmp, err := os.CreateTemp(projectDir, fileKey+".tmp.*.json")
 	if err != nil {
 		return err
 	}

@@ -163,7 +163,10 @@ func (s *Store) SaveACLs() error {
 		s.mu.RLock()
 		for cid, acl := range s.roomACLs {
 			if acl != nil {
-				_ = s.pg.SaveRoomACL(cid, acl.Allow, acl.Deny)
+				if err := s.pg.SaveRoomACL(cid, acl.Allow, acl.Deny); err != nil {
+					s.mu.RUnlock()
+					return err
+				}
 			}
 		}
 		s.mu.RUnlock()

@@ -317,7 +317,7 @@ fi
 
 if [[ "$SKIP_BUILD" == "false" ]]; then
 	if [[ -z "$PACK_VERSION" ]]; then
-		PACK_VERSION="$(TZ=Asia/Taipei date '+1.%y.%m%d build %H%M')"
+		PACK_VERSION="$(TZ=Asia/Taipei date '+0.%y.%m%d build %H%M')"
 	fi
 	export SMALLTALK_VERSION="$PACK_VERSION"
 	print "開始建立 SmallTalk 發行檔：$PACK_VERSION"

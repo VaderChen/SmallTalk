@@ -8,11 +8,7 @@
       setInterval(() => {
         if (!document.hidden) checkSessionAlive();
       }, 60000);
-      setInterval(() => {
-        if (!document.hidden) refreshStats();
-      }, 3000);
-
-      let refreshInFlight = false;
+	  let refreshInFlight = false;
       let refreshCycleCount = 0;
       const refreshVisibleData = async () => {
         if (document.hidden || refreshInFlight) return;
@@ -36,14 +32,30 @@
           refreshInFlight = false;
         }
       };
-      setInterval(refreshVisibleData, 3000);
-
-      document.addEventListener("visibilitychange", () => {
-        if (!document.hidden) {
-          tickStatus();
-          refreshStats();
-          refreshVisibleData();
+      let refreshTimer = 0;
+      const scheduleRefresh = (delay) => {
+        window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(runRefreshCycle, delay);
+      };
+      const runRefreshCycle = async () => {
+        if (document.hidden) {
+          scheduleRefresh(15000);
+          return;
         }
+        try {
+          await Promise.all([refreshStats(), refreshVisibleData()]);
+          scheduleRefresh(state.level === "threads" || state.level === "article" ? 5000 : 15000);
+        } catch (error) {
+          scheduleRefresh(30000);
+        }
+      };
+      scheduleRefresh(5000);
+
+	  document.addEventListener("visibilitychange", () => {
+		if (!document.hidden) {
+		  tickStatus();
+		  scheduleRefresh(0);
+		}
       }, { passive: true });
       try {
         await loadBoards();

@@ -7,13 +7,14 @@ import "time"
 func (s *Store) SnapshotRooms() []RoomSnapshot {
 	s.mu.RLock()
 	type roomRef struct {
+		pid string
 		rid string
 		r   *Room
 	}
 	var rooms []roomRef
-	for _, p := range s.projects {
+	for pid, p := range s.projects {
 		for rid, r := range p.Rooms {
-			rooms = append(rooms, roomRef{rid: rid, r: r})
+			rooms = append(rooms, roomRef{pid: pid, rid: rid, r: r})
 		}
 	}
 	s.mu.RUnlock()
@@ -28,6 +29,8 @@ func (s *Store) SnapshotRooms() []RoomSnapshot {
 		item.r.mu.RUnlock()
 
 		out = append(out, RoomSnapshot{
+			ProjectID:  item.pid,
+			RoomID:     item.rid,
 			Board:      board,
 			ExportedAt: now,
 			Messages:   msgs,
