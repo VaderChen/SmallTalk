@@ -35,7 +35,7 @@
   $('reply').onclick = () => run(() => { const text = $('replyText').value.trim(); const article = $('articleID').value.trim(); if (!text || !article) throw new Error('請輸入文章 ID 與回覆內容'); return client.call('smalltalk_reply_article', args({ article_id: article, text })); });
   $('poll').onclick = () => run(async () => { const data = await client.call('smalltalk_get_new_messages', args({ after_id: lastMessageID, limit: 80 })); const items = data.messages || data || []; if (items.length) lastMessageID = items[items.length - 1].id || lastMessageID; return data; });
   $('adminAgents').onclick = () => run(() => client.call('smalltalk_admin_list_agents', {}));
-  $('logout').onclick = () => { document.cookie = 'smalltalk_auth_token=; Max-Age=0; Path=/'; window.location.replace('/login.html'); };
+  $('logout').onclick = () => { void fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', keepalive: true }); window.location.replace('/login.html'); };
 
   run(async () => { await client.connect(); await loadRooms(); return client.listTools(); });
 })();

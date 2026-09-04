@@ -3,6 +3,7 @@ package main
 import (
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -18,6 +19,14 @@ type requestAuthContext struct {
 	ClientID      string
 	SourceIP      string
 	JWT           *MarsJSON.JSONObject
+}
+
+func hasURLCredential(r *http.Request) bool {
+	if r == nil || r.URL == nil {
+		return false
+	}
+	query := r.URL.Query()
+	return strings.TrimSpace(query.Get("token")) != "" || strings.TrimSpace(query.Get("auth_token")) != ""
 }
 
 func (ctx *requestAuthContext) IsSystem() bool {
@@ -126,24 +135,6 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 		}, true
 	}
 
-	if len(tokens) == 0 && store != nil {
-		for _, macAddress := range candidateDeviceMACs(r) {
-			if entry, ok := store.FindTrustedAgentByMACAndIP(macAddress, sourceIP); ok {
-				principalType := "agent"
-				if strings.EqualFold(strings.TrimSpace(entry.ClientID), "root") || entry.IsAdmin {
-					principalType = "root"
-				}
-				return &requestAuthContext{
-					Kind:          "smalltalk-dev-trusted",
-					PrincipalType: principalType,
-					TokenKind:     "trusted-device",
-					ClientID:      strings.TrimSpace(entry.ClientID),
-					SourceIP:      sourceIP,
-				}, true
-			}
-		}
-	}
-
 	return nil, false
 }
 
@@ -157,8 +148,6 @@ func candidateAuthTokens(r *http.Request) []string {
 		extractBearerLikeToken(r.Header.Get("Authorization")),
 		strings.TrimSpace(r.Header.Get("X-SmallTalk-Token")),
 		strings.TrimSpace(r.Header.Get("X-Auth-Token")),
-		strings.TrimSpace(r.URL.Query().Get("auth_token")),
-		strings.TrimSpace(r.URL.Query().Get("token")),
 	}
 
 	if cookie, err := r.Cookie("smalltalk_auth_token"); err == nil {
@@ -176,6 +165,38 @@ func candidateAuthTokens(r *http.Request) []string {
 		out = append(out, item)
 	}
 	return out
+}
+
+func hasHeaderCredential(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	return strings.TrimSpace(r.Header.Get("Authorization")) != "" ||
+		strings.TrimSpace(r.Header.Get("Authentication")) != "" ||
+		strings.TrimSpace(r.Header.Get("X-SmallTalk-Token")) != "" ||
+		strings.TrimSpace(r.Header.Get("X-Auth-Token")) != ""
+}
+
+func isSafeCookieMutation(r *http.Request, store *Store) bool {
+	if r == nil || r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions || hasHeaderCredential(r) {
+		return true
+	}
+	if _, err := r.Cookie("smalltalk_auth_token"); err != nil {
+		return true
+	}
+	rawOrigin := strings.TrimSpace(r.Header.Get("Origin"))
+	if rawOrigin == "" {
+		rawOrigin = strings.TrimSpace(r.Header.Get("Referer"))
+	}
+	parsed, err := url.Parse(rawOrigin)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	expectedScheme := "http"
+	if requestUsesHTTPS(r, store) {
+		expectedScheme = "https"
+	}
+	return strings.EqualFold(parsed.Host, r.Host) && strings.EqualFold(parsed.Scheme, expectedScheme)
 }
 
 func extractBearerLikeToken(raw string) string {
@@ -227,6 +248,9 @@ func sourceIPOfWithStore(r *http.Request, store *Store) string {
 		return ""
 	}
 	peer := remoteHost(r)
+	if store == nil || !store.isTrustedProxy(peer) {
+		return peer
+	}
 	for _, key := range []string{"CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"} {
 		raw := strings.TrimSpace(r.Header.Get(key))
 		if raw == "" {
@@ -236,15 +260,7 @@ func sourceIPOfWithStore(r *http.Request, store *Store) string {
 			raw = strings.TrimSpace(strings.Split(raw, ",")[0])
 		}
 		if net.ParseIP(raw) != nil {
-			if store != nil && store.isTrustedProxy(peer) {
-				return raw
-			}
-			if key == "CF-Connecting-IP" {
-				return raw
-			}
-			if pIP := net.ParseIP(peer); pIP != nil && (pIP.IsLoopback() || pIP.IsPrivate()) {
-				return raw
-			}
+			return raw
 		}
 	}
 	return peer
@@ -276,4 +292,17 @@ func isAgentAdmin(store *Store, clientID string) bool {
 	}
 	entry, ok := store.GetAgentRegistry(clientID)
 	return ok && entry.IsAdmin
+}
+
+func isRegisteredAgentSource(entry AgentRegistryEntry, sourceIP string) bool {
+	sourceIP = strings.TrimSpace(sourceIP)
+	if sourceIP == "" || entry.Meta == nil {
+		return false
+	}
+	for _, key := range []string{"source_ip", "dev_login_ip"} {
+		if recorded, ok := entry.Meta[key].(string); ok && isSameSubnetOrLocal(recorded, sourceIP) {
+			return true
+		}
+	}
+	return false
 }

@@ -42,13 +42,31 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 	if facade == nil || store == nil {
 		return mustJSON(ErrorResponse{Error: "store not available"})
 	}
+	if hasURLCredential(r) {
+		if w != nil {
+			w.WriteHeader(http.StatusBadRequest)
+		}
+		return mustJSON(ErrorResponse{Error: "credentials in URLs are not allowed"})
+	}
+	if !isSafeCookieMutation(r, store) {
+		if w != nil {
+			w.WriteHeader(http.StatusForbidden)
+		}
+		return mustJSON(ErrorResponse{Error: "cross-origin request rejected"})
+	}
+	if len(body) > maxAuthRequestBodyBytes {
+		if w != nil {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+		}
+		return mustJSON(ErrorResponse{Error: "request body too large"})
+	}
 	clientID, authorized := "Guest", false
 	if p, ok := requireAuthorizedRequest(r, nil, store); ok {
 		clientID, authorized = p.ClientID, true
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api")
 	if store.VisitorTracker != nil {
-		visitorKey := extractVisitorKey(r, clientID)
+		visitorKey := extractVisitorKey(r, clientID, store)
 		isPV := path != "/health"
 		store.VisitorTracker.RecordVisit(visitorKey, isPV)
 	}
@@ -259,19 +277,12 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 	return mustJSON(ErrorResponse{Error: "not found"})
 }
 
-func extractVisitorKey(r *http.Request, clientID string) string {
+func extractVisitorKey(r *http.Request, clientID string, store *Store) string {
 	if clientID != "" && clientID != "Guest" {
 		return "client:" + clientID
 	}
 	if cookie, err := r.Cookie("smalltalk_vid"); err == nil && strings.TrimSpace(cookie.Value) != "" {
 		return "web:" + strings.TrimSpace(cookie.Value)
 	}
-	ip := r.Header.Get("X-Forwarded-For")
-	if ip == "" {
-		ip = r.Header.Get("X-Real-IP")
-	}
-	if ip == "" {
-		ip = r.RemoteAddr
-	}
-	return "ip:" + strings.Split(ip, ",")[0]
+	return "ip:" + sourceIPOfWithStore(r, store)
 }

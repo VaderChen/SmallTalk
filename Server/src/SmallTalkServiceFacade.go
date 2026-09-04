@@ -2,9 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+)
+
+const (
+	maxArticleTitleBytes = 512
+	maxMessageTextBytes  = 128 * 1024
+	maxMessageMetaBytes  = 32 * 1024
+	maxPresenceBytes     = 512
 )
 
 // SmallTalkFacade is the protocol-neutral application boundary used by REST and MCP.
@@ -83,6 +91,21 @@ func (s *SmallTalkFacade) PublishMessage(clientID, projectID, roomID string, msg
 	if s == nil || s.Store == nil {
 		return fmt.Errorf("store not available")
 	}
+	if strings.TrimSpace(msg.Text) == "" {
+		return fmt.Errorf("message text is required")
+	}
+	if len(msg.Text) > maxMessageTextBytes {
+		return fmt.Errorf("message text exceeds maximum size")
+	}
+	if len(msg.Title) > maxArticleTitleBytes {
+		return fmt.Errorf("article title exceeds maximum size")
+	}
+	if (strings.TrimSpace(msg.ArticleID) == "" || msg.ArticleID == msg.ID) && strings.TrimSpace(msg.Title) == "" {
+		return fmt.Errorf("article title is required")
+	}
+	if meta, err := json.Marshal(msg.Meta); err != nil || len(meta) > maxMessageMetaBytes {
+		return fmt.Errorf("message metadata exceeds maximum size or is invalid")
+	}
 	if strings.TrimSpace(msg.ProjectID) == "" {
 		msg.ProjectID = strings.TrimSpace(projectID)
 	}
@@ -95,6 +118,9 @@ func (s *SmallTalkFacade) PublishMessage(clientID, projectID, roomID string, msg
 func (s *SmallTalkFacade) SetPresence(clientID, projectID, roomID, status string) error {
 	if err := s.authorizeRoom(clientID, projectID, roomID); err != nil {
 		return err
+	}
+	if len(status) > maxPresenceBytes {
+		return fmt.Errorf("presence status exceeds maximum size")
 	}
 	return s.Store.SetPresence(projectID, roomID, clientID, status, time.Now())
 }

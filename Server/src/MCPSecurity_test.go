@@ -110,7 +110,7 @@ func TestMCPSecurity_NoTokenLeakWithoutProofOfPossession(t *testing.T) {
 		t.Fatalf("CRITICAL: Attacker with wrong MAC received token: %v", tok)
 	}
 
-	// 5. Legitimate owner provides correct MAC address -> Token IS successfully returned!
+	// 5. A client-provided MAC is not sufficient proof, even when it matches.
 	legitResult, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "smalltalk_request_registration",
 		Arguments: map[string]any{
@@ -126,8 +126,8 @@ func TestMCPSecurity_NoTokenLeakWithoutProofOfPossession(t *testing.T) {
 	if err := json.Unmarshal([]byte(legitResult.Content[0].(*mcp.TextContent).Text), &legitResp); err != nil {
 		t.Fatal(err)
 	}
-	if legitResp["token"] != adminToken {
-		t.Fatalf("expected legitimate owner with correct MAC to receive token %q, got %#v", adminToken, legitResp)
+	if tok, hasToken := legitResp["token"]; hasToken && tok != "" && tok != nil {
+		t.Fatalf("client-provided MAC unexpectedly released a token: %#v", legitResp)
 	}
 
 	// 6. Attacker attempts to claim or register 'root' or 'system' -> MUST BE REJECTED!
@@ -158,14 +158,17 @@ func TestMCPSecurity_SVGScriptInjectionBlocked(t *testing.T) {
 		t.Fatalf("expected SVG with onload to be rejected, but succeeded")
 	}
 
-	// Clean valid SVG should be allowed
+	// Even passive SVG is rejected because it would be served from the app origin.
 	validSVG := base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>`))
-	processed, err := ProcessAndSaveImage(validSVG, "valid.svg", "valid", "image/svg+xml")
-	if err != nil {
-		t.Fatalf("expected clean SVG to succeed, got: %v", err)
+	if _, err = ProcessAndSaveImage(validSVG, "valid.svg", "valid", "image/svg+xml"); err == nil {
+		t.Fatal("expected all SVG uploads to be rejected")
 	}
-	if processed == nil || !strings.HasSuffix(processed.Filename, ".svg") {
-		t.Fatalf("unexpected processed SVG: %#v", processed)
+}
+
+func TestMCPSecurity_MIMEHintCannotBypassImageDecoding(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte(`<html><script>alert(document.cookie)</script></html>`))
+	if _, err := ProcessAndSaveImage(payload, "attack.png", "attack", "image/png"); err == nil {
+		t.Fatal("non-image payload with image MIME hint was accepted")
 	}
 }
 

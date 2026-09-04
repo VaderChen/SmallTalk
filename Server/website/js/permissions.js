@@ -27,34 +27,24 @@
         ?.slice(prefix.length) || '';
     }
 
-    function getAuthToken() {
-      return getCookie('smalltalk_auth_token').trim();
-    }
-
     function clearSessionAndRedirect() {
       const expire = 'expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax';
-      document.cookie = `smalltalk_auth_token=; ${expire}`;
       document.cookie = `smalltalk_account=; ${expire}`;
       document.cookie = `smalltalk_project=; ${expire}`;
       document.cookie = `smalltalk_nickname=; ${expire}`;
+      void fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', keepalive: true });
       window.location.replace('/login.html');
     }
 
     function buildAuthHeaders(extra) {
-      const authToken = getAuthToken();
-      if (!authToken) {
-        clearSessionAndRedirect();
-        throw new Error('unauthorized');
-      }
       return {
         Accept: 'application/json',
-        Authorization: `Bearer ${authToken}`,
         ...(extra || {})
       };
     }
 
     async function apiGet(url) {
-      const res = await fetch(url, { headers: buildAuthHeaders() });
+      const res = await fetch(url, { credentials: 'same-origin', headers: buildAuthHeaders() });
       const data = await res.json().catch(() => ({}));
       if (data && typeof data === 'object' && data.error === 'unauthorized') {
         clearSessionAndRedirect();
@@ -67,6 +57,7 @@
     async function apiPost(url, payload) {
       const res = await fetch(url, {
         method: 'POST',
+        credentials: 'same-origin',
         headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload || {})
       });
@@ -82,6 +73,7 @@
     async function apiDelete(url) {
       const res = await fetch(url, {
         method: 'DELETE',
+        credentials: 'same-origin',
         headers: buildAuthHeaders()
       });
       const data = await res.json().catch(() => ({}));
@@ -117,7 +109,7 @@
 
     function renderRoomRefs(items) {
       if (!items || !items.length) return '<span class="statusMuted">未設定</span>';
-      return items.map((item) => `<span class="roomTag">${item.project_id}/${item.room_id}</span>`).join('');
+      return items.map((item) => `<span class="roomTag">${escapeHTML(item.project_id)}/${escapeHTML(item.room_id)}</span>`).join('');
     }
 
     let autoApprovalIntervalMin = 1;
@@ -524,11 +516,11 @@
               ${agent.read_only ? '<span class="badgeReadOnly">手動唯讀</span>' : ''}
               ${isAutoReadOnly ? '<span class="badgeAutoReadOnly">滿月未登入自動唯讀</span>' : ''}
             </div>
-            <div class="subText">client_id=${escapeHTML(agent.client_id)}<br>MAC=${escapeHTML(agent.mac_address || '-')}<br>註冊時間=${fmtTS(agent.registered_at)}<br>最後更新=${fmtTS(agent.last_seen_at)}</div>
+            <div class="subText">client_id=${escapeHTML(agent.client_id)}<br>MAC=${escapeHTML(agent.mac_address || '-')}<br>註冊時間=${escapeHTML(fmtTS(agent.registered_at))}<br>最後更新=${escapeHTML(fmtTS(agent.last_seen_at))}</div>
           </td>
           <td>
             <div class="${agent.token_issued ? 'statusOk' : 'statusMuted'}">${agent.token_issued ? '已核發' : '未核發'}</div>
-            <div class="subText">${agent.token_issued ? `核發=${fmtTS(agent.token_issued_at)}<br>到期=${fmtTS(agent.token_expires_at)}` : '需按下核發短 Token'}</div>
+            <div class="subText">${agent.token_issued ? `核發=${escapeHTML(fmtTS(agent.token_issued_at))}<br>到期=${escapeHTML(fmtTS(agent.token_expires_at))}` : '需按下核發短 Token'}</div>
           </td>
           <td>${renderRoomRefs(acl.allow_rooms)}</td>
           <td>${renderRoomRefs(acl.deny_rooms)}</td>
@@ -597,14 +589,14 @@
         row.className = 'roomEditorRow';
         row.innerHTML = `
           <div>
-            <div style="font-weight:800">${room.name || room.room_id}</div>
-            <div class="subText">${room.project_id}/${room.room_id}</div>
+            <div style="font-weight:800">${escapeHTML(room.name || room.room_id)}</div>
+            <div class="subText">${escapeHTML(room.project_id)}/${escapeHTML(room.room_id)}</div>
           </div>
           <div class="checkCell">
-            <input type="checkbox" data-kind="allow" data-key="${key}" ${allowSet.has(key) ? 'checked' : ''} />
+            <input type="checkbox" data-kind="allow" data-key="${escapeHTML(key)}" ${allowSet.has(key) ? 'checked' : ''} />
           </div>
           <div class="checkCell">
-            <input type="checkbox" data-kind="deny" data-key="${key}" ${denySet.has(key) ? 'checked' : ''} />
+            <input type="checkbox" data-kind="deny" data-key="${escapeHTML(key)}" ${denySet.has(key) ? 'checked' : ''} />
           </div>
         `;
         body.appendChild(row);
@@ -613,7 +605,7 @@
       body.querySelectorAll('input[data-kind="allow"]').forEach((input) => {
         input.addEventListener('change', () => {
           if (input.checked) {
-            const deny = body.querySelector(`input[data-kind="deny"][data-key="${input.getAttribute('data-key')}"]`);
+            const deny = input.closest('.roomEditorRow')?.querySelector('input[data-kind="deny"]');
             if (deny) deny.checked = false;
           }
         });
@@ -621,7 +613,7 @@
       body.querySelectorAll('input[data-kind="deny"]').forEach((input) => {
         input.addEventListener('change', () => {
           if (input.checked) {
-            const allow = body.querySelector(`input[data-kind="allow"][data-key="${input.getAttribute('data-key')}"]`);
+            const allow = input.closest('.roomEditorRow')?.querySelector('input[data-kind="allow"]');
             if (allow) allow.checked = false;
           }
         });
@@ -934,7 +926,7 @@
         const statusHTML = `<div style="display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;">${badges.join('')}</div>`;
 
         const owner = r.owner ? `<strong style="color: var(--accent);">${escapeHTML(r.owner)}</strong>` : '<span style="color: var(--muted);">(未指定)</span>';
-        const cat = r.category ? escapeHTML(r.category) : (r.project_id || r.project || '一般');
+        const cat = escapeHTML(r.category || r.project_id || r.project || '一般');
         return `
           <tr>
             <td><code>${escapeHTML(fullRoom)}</code></td>

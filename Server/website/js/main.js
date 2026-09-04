@@ -9,29 +9,18 @@
         ?.slice(prefix.length) || '';
     }
 
-    function getAuthToken() {
-      return getCookie('smalltalk_auth_token').trim();
-    }
-
     function clearSessionAndRedirect() {
       const expire = 'expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax';
-      document.cookie = `smalltalk_auth_token=; ${expire}`;
       document.cookie = `smalltalk_account=; ${expire}`;
       document.cookie = `smalltalk_project=; ${expire}`;
+      void fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', keepalive: true });
       window.location.replace('/login.html');
     }
 
     async function apiGet(url) {
-      const authToken = getAuthToken();
-      if (!authToken) {
-        clearSessionAndRedirect();
-        throw new Error('unauthorized');
-      }
       const res = await fetch(url, {
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        }
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
@@ -42,17 +31,12 @@
     }
 
     async function apiPost(url, data) {
-      const authToken = getAuthToken();
-      if (!authToken) {
-        clearSessionAndRedirect();
-        throw new Error('unauthorized');
-      }
       const res = await fetch(url, {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${authToken}`
+          'Accept': 'application/json'
         },
         body: JSON.stringify(data || {})
       });
@@ -66,7 +50,7 @@
 
     async function checkSessionAlive() {
       try {
-        await apiGet('/api/health');
+        await apiGet('/auth/session');
       } catch (e) {
         const message = String(e?.message || e || '');
         if (message.includes('unauthorized')) {

@@ -585,7 +585,7 @@
               <div class="replyNo">${fmtReplyNo(index + 1)}</div>
               <div class="replyAuthor">${authorHTML(message.author)}</div>
               <div class="replyBody">${renderRichArticleBody(message.body)}</div>
-              <div class="replyMeta">${fmtTS(message.ts)}</div>
+              <div class="replyMeta">${escapeHTML(fmtTS(message.ts))}</div>
             </div>
           `;
         }).join("");

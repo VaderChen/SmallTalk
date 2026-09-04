@@ -27,7 +27,7 @@ type clientAuthPayload struct {
 	ExpireAt int64  `json:"exp"`
 }
 
-const defaultClientTokenTTLSec = 100 * 365 * 24 * 60 * 60
+const defaultClientTokenTTLSec = 90 * 24 * 60 * 60
 
 func encodeClientAuthToken(clientID string, ttlSec int) (string, time.Time, time.Time, error) {
 	return encodeAuthToken(clientID, "smalltalk-client-auth", ttlSec)

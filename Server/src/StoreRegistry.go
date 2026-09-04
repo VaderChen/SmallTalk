@@ -163,7 +163,7 @@ func (s *Store) SaveRegistry() error {
 	if s.dataDir == "" {
 		return nil
 	}
-	return os.WriteFile(s.registryPath(), b, 0644)
+	return writePrivateFile(s.registryPath(), b)
 }
 
 func (s *Store) UpsertAgentRegistry(in AgentRegistryUpsert) (AgentRegistryEntry, error) {
@@ -562,6 +562,19 @@ func (s *Store) ListAgentRegistry() []AgentRegistryEntry {
 	return out
 }
 
+func redactAgentCredential(entry AgentRegistryEntry) AgentRegistryEntry {
+	entry.Token = ""
+	return entry
+}
+
+func (s *Store) ListAgentRegistryRedacted() []AgentRegistryEntry {
+	items := s.ListAgentRegistry()
+	for i := range items {
+		items[i] = redactAgentCredential(items[i])
+	}
+	return items
+}
+
 func (s *Store) saveRegistryLocked() error {
 	disk := make(map[string]agentRegistryDiskEntry, len(s.agentRegistry))
 	for clientID, item := range s.agentRegistry {
@@ -600,7 +613,7 @@ func (s *Store) saveRegistryLocked() error {
 	if s.dataDir == "" {
 		return nil
 	}
-	return os.WriteFile(s.registryPath(), b, 0644)
+	return writePrivateFile(s.registryPath(), b)
 }
 
 func (s *Store) FindAgentRegistryByMAC(macAddress string) (AgentRegistryEntry, bool) {

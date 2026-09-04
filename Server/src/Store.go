@@ -76,7 +76,7 @@ type Store struct {
 	autoApprovalEnabled     bool
 	autoApprovalIntervalMin int
 	allowedMCPOrigins       map[string]bool
-	trustedProxyCIDRs   []*net.IPNet
+	trustedProxyCIDRs       []*net.IPNet
 
 	systemPolicyMu     sync.RWMutex
 	systemPolicyLoaded bool
@@ -239,7 +239,7 @@ func NewStoreWithError(dataDir string, maxInMemMsgs int, persist bool) (*Store, 
 		dataDir: dataDir, maxInMemMsgs: maxInMemMsgs, persistToDisk: persist,
 		roomLastMsgAt: make(map[string]time.Time), agentLastMsgAt: make(map[string]time.Time),
 		dayKey: time.Now().Format("2006-01-02"), allowedMCPOrigins: defaultMCPOrigins(),
-		VisitorTracker: NewVisitorTracker(dataDir),
+		VisitorTracker:  NewVisitorTracker(dataDir),
 		AuthRateLimiter: NewAuthRateLimiter(5, 1*time.Minute, 5*time.Minute),
 		RegRateLimiter:  NewAuthRateLimiter(3, 10*time.Minute, 10*time.Minute),
 	}
@@ -2350,8 +2350,8 @@ func (s *Store) ListMessagesPage(projectID, roomID string, opts MessagePageOptio
 	}
 	s.mu.RUnlock()
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.touchLocked(time.Now())
 
 	msgs := r.Messages
@@ -2639,8 +2639,8 @@ func (s *Store) GetArticle(projectID, roomID, articleID string) (*ArticleSummary
 	}
 	s.mu.RUnlock()
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.touchLocked(time.Now())
 
 	var rootMsg *Message
@@ -3134,8 +3134,8 @@ func (s *Store) ListMessagesAfter(projectID, roomID, afterID string, afterTS tim
 	}
 	s.mu.RUnlock()
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.touchLocked(time.Now())
 
 	start := 0

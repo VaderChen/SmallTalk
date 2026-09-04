@@ -72,10 +72,16 @@
       }
     }
 
-    if (getCookie('smalltalk_auth_token')) {
-      window.location.replace('/main.html');
-    } else {
+    (async () => {
+      try {
+        const res = await fetch('/auth/session', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) {
+          window.location.replace('/main.html');
+          return;
+        }
+      } catch (_) {}
       loadProjects();
       $('loginForm').addEventListener('submit', submitLogin);
-    }
+    })();
   

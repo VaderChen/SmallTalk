@@ -154,11 +154,11 @@ func TestCreateRoomFullAndAdminAPI(t *testing.T) {
 
 func TestPermissionsAPI_AdminPasswordUpdate(t *testing.T) {
 	store := NewStore(t.TempDir(), 20, false)
-	store.SetDefaultAdminPassword("root")
+	store.SetDefaultAdminPassword("root-password-123")
 	adminAPI := &PermissionsAPI{Store: store}
 	authAPI := &HttpAPI_auth{
 		DefaultAccount:  "root",
-		DefaultPassword: "root",
+		DefaultPassword: "root-password-123",
 		Store:           store,
 	}
 
@@ -185,26 +185,26 @@ func TestPermissionsAPI_AdminPasswordUpdate(t *testing.T) {
 	}
 
 	// 1. Wrong old password
-	respWrong := callPasswordAPI(`{"old_password":"wrong","new_password":"newpass123","confirm_password":"newpass123"}`)
+	respWrong := callPasswordAPI(`{"old_password":"wrong","new_password":"new-password-123","confirm_password":"new-password-123"}`)
 	if !strings.Contains(respWrong, "目前密碼輸入錯誤") {
 		t.Fatalf("expected wrong password error, got: %s", respWrong)
 	}
 
 	// 2. Mismatched confirm password
-	respMismatch := callPasswordAPI(`{"old_password":"root","new_password":"newpass123","confirm_password":"different"}`)
+	respMismatch := callPasswordAPI(`{"old_password":"root-password-123","new_password":"new-password-123","confirm_password":"different-value-123"}`)
 	if !strings.Contains(respMismatch, "兩次輸入的新密碼不一致") {
 		t.Fatalf("expected mismatch error, got: %s", respMismatch)
 	}
 
 	// 3. Valid update
-	respOK := callPasswordAPI(`{"old_password":"root","new_password":"secretAdminPassword!","confirm_password":"secretAdminPassword!"}`)
+	respOK := callPasswordAPI(`{"old_password":"root-password-123","new_password":"secretAdminPassword!","confirm_password":"secretAdminPassword!"}`)
 	if !strings.Contains(respOK, `"ok":true`) {
 		t.Fatalf("expected success, got: %s", respOK)
 	}
 
 	// Verify store has new password
-	if store.GetAdminPassword() != "secretAdminPassword!" {
-		t.Fatalf("store password not updated, got: %s", store.GetAdminPassword())
+	if !store.VerifyAdminPassword("secretAdminPassword!") {
+		t.Fatal("store password hash does not verify the new password")
 	}
 
 	// 4. Test /auth/login with old password -> must FAIL

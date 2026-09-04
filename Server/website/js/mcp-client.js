@@ -22,11 +22,9 @@
 
     async request(method, params, notification = false) {
       const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
-      const token = cookie('smalltalk_auth_token');
-      if (token) headers.Authorization = 'Bearer ' + decodeURIComponent(token);
       if (this.sessionID) headers['Mcp-Session-Id'] = this.sessionID;
       const response = await fetch(this.endpoint, {
-        method: 'POST', headers, body: JSON.stringify({
+        method: 'POST', headers, credentials: 'same-origin', body: JSON.stringify({
           jsonrpc: '2.0', ...(notification ? {} : { id: ++this.requestID }), method, ...(params ? { params } : {})
         })
       });

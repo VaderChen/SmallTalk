@@ -256,9 +256,14 @@ func (s *Store) ListRoomsForClient(projectID, clientID string) ([]Room, error) {
 		return nil, err
 	}
 	out := make([]Room, 0, len(rooms))
-	for _, room := range rooms {
+	for i := range rooms {
+		room := &rooms[i]
 		if s.CanClientAccessRoom(clientID, projectID, room.ID) {
-			out = append(out, room)
+			out = append(out, Room{
+				ID: room.ID, Board: room.Board, Name: room.Name,
+				Category: room.Category, Description: room.Description,
+				Owner: room.Owner, Pinned: room.Pinned,
+			})
 		}
 	}
 	return out, nil
@@ -338,4 +343,3 @@ func (s *Store) ModeratorMuteClientInRoom(targetClientID, projectID, roomID stri
 	s.mu.Unlock()
 	return record, nil
 }
-

@@ -33,6 +33,33 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 	if api == nil || api.Store == nil {
 		return mustJSON(ErrorResponse{Error: "store not available"})
 	}
+	if hasURLCredential(r) {
+		if w != nil {
+			w.WriteHeader(http.StatusBadRequest)
+		}
+		return mustJSON(ErrorResponse{Error: "credentials in URLs are not allowed"})
+	}
+	if !isSafeCookieMutation(r, api.Store) {
+		if w != nil {
+			w.WriteHeader(http.StatusForbidden)
+		}
+		return mustJSON(ErrorResponse{Error: "cross-origin request rejected"})
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && strings.TrimSpace(body) == "" && r.Body != nil {
+		data, err := io.ReadAll(io.LimitReader(r.Body, maxAuthRequestBodyBytes+1))
+		if err != nil || len(data) > maxAuthRequestBodyBytes {
+			if w != nil {
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+			}
+			return mustJSON(ErrorResponse{Error: "request body too large"})
+		}
+		body = string(data)
+	} else if len(body) > maxAuthRequestBodyBytes {
+		if w != nil {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+		}
+		return mustJSON(ErrorResponse{Error: "request body too large"})
+	}
 	if err := requireHTTPRoot(r, jwt, api.Store); err != nil {
 		return mustJSON(ErrorResponse{Error: err.Error()})
 	}
@@ -122,15 +149,14 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 		if req.OldPassword == "" {
 			return mustJSON(ErrorResponse{Error: "請輸入目前密碼"})
 		}
-		if len(req.NewPassword) < 4 {
-			return mustJSON(ErrorResponse{Error: "新密碼長度至少需 4 個字元"})
+		if len([]rune(req.NewPassword)) < minAdminPasswordLength {
+			return mustJSON(ErrorResponse{Error: fmt.Sprintf("新密碼長度至少需 %d 個字元", minAdminPasswordLength)})
 		}
 		if req.ConfirmPassword != "" && req.NewPassword != req.ConfirmPassword {
 			return mustJSON(ErrorResponse{Error: "兩次輸入的新密碼不一致"})
 		}
 
-		currentPwd := api.Store.GetAdminPassword()
-		if req.OldPassword != currentPwd {
+		if !api.Store.VerifyAdminPassword(req.OldPassword) {
 			return mustJSON(ErrorResponse{Error: "目前密碼輸入錯誤，請重新確認"})
 		}
 
@@ -357,7 +383,7 @@ func (h *HttpAPI_auth) handleRegistryHTTP(w http.ResponseWriter, r *http.Request
 		if r.Method != http.MethodGet {
 			return mustJSON(ErrorResponse{Error: "method not allowed"})
 		}
-		return mustJSON(map[string]any{"agents": h.Store.ListAgentRegistry()})
+		return mustJSON(map[string]any{"agents": h.Store.ListAgentRegistryRedacted()})
 	}
 	if len(path) == 3 && (path[2] == "delete" || path[2] == "remove") {
 		clientID := strings.TrimSpace(path[1])

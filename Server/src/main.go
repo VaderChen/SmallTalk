@@ -29,7 +29,7 @@ func RunService() {
 	service := MarsService.Create("agent.properties", cloud)
 	marsCloudURL := service.Property.OptString("mars_cloud_url", "")
 	defaultAccount := service.Property.OptString("default_Account", "root")
-	defaultPassword := service.Property.OptString("default_password", "root")
+	defaultPassword := service.Property.OptString("default_password", "")
 	defaultProj := service.Property.OptString("mars_cloud_proj", "")
 	webEntryPath := service.Property.OptString("web_entry_path", "/talk.html")
 
@@ -258,6 +258,8 @@ func startMCPListeners(store *Store, httpPort, httpsPort int, certFile, keyFile 
 			Addr:              addr,
 			Handler:           mux,
 			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second,
+			WriteTimeout:      120 * time.Second,
 			IdleTimeout:       120 * time.Second,
 			MaxHeaderBytes:    1 << 20,
 		}

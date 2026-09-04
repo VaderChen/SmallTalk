@@ -112,16 +112,12 @@
       return getCookie("smalltalk_account").trim();
     }
 
-    function getAuthToken() {
-      return getCookie("smalltalk_auth_token").trim();
-    }
-
     function clearSessionAndRedirect() {
       const expire = "expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax";
-      document.cookie = `smalltalk_auth_token=; ${expire}`;
       document.cookie = `smalltalk_account=; ${expire}`;
       document.cookie = `smalltalk_project=; ${expire}`;
       document.cookie = `smalltalk_nickname=; ${expire}`;
+      void fetch("/auth/logout", { method: "POST", credentials: "same-origin", keepalive: true });
       window.location.replace("/login.html");
     }
 
@@ -418,10 +414,8 @@
 
     async function apiGet(path) {
       const clientID = getClientID();
-      const authToken = getAuthToken();
       const sep = path.includes("?") ? "&" : "?";
       const headers = { "X-Client-ID": clientID };
-      if (authToken) headers.Authorization = `Bearer ${authToken}`;
       const res = await fetch(`${path}${sep}client_id=${encodeURIComponent(clientID)}`, {
         credentials: "same-origin",
         headers
@@ -439,16 +433,10 @@
 
     async function apiPost(path, payload) {
       const clientID = getClientID();
-      const authToken = getAuthToken();
-      if (!authToken) {
-        clearSessionAndRedirect();
-        throw new Error("unauthorized");
-      }
       const sep = path.includes("?") ? "&" : "?";
       const headers = {
         "Content-Type": "application/json",
         "X-Client-ID": clientID,
-        Authorization: `Bearer ${authToken}`
       };
       const res = await fetch(`${path}${sep}client_id=${encodeURIComponent(clientID)}`, {
         method: "POST",
@@ -469,7 +457,7 @@
 
     async function checkSessionAlive() {
       try {
-        await apiGet("/api/health");
+        await apiGet("/auth/session");
       } catch (error) {
         const message = String(error?.message || error || "");
         if (message.includes("unauthorized")) {
@@ -806,12 +794,11 @@
       dlgBoardError.style.display = "none";
       dlgBoardError.textContent = "";
       try {
-        const authToken = getAuthToken();
         const res = await fetch(`/api/boards/${encodeURIComponent(board.roomID)}`, {
           method: "DELETE",
+          credentials: "same-origin",
           headers: {
-            "Accept": "application/json",
-            "Authorization": `Bearer ${authToken}`
+            "Accept": "application/json"
           }
         });
         const payload = await res.json();

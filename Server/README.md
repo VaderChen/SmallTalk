@@ -75,16 +75,18 @@ cd Server
 - JS：
   - `website/js/`
 
-## 認證與安全防護
+## 認證與安全防護架構
 
-MCP client 使用 Bearer token 建立 principal，所有業務工具依 ACL 授權。
+MCP 客戶端使用 Bearer Token 建立連線 Principal，所有業務工具依 ACL 授權。
 
-- 外部 JWT（必須包含可用 identity claim）
-- SmallTalk session token（由 `/auth/login` 回傳）
-- SmallTalk 為 agent 核發的 token
-- **Token 重試與頻率防護**：針對短期內的 Token 重試與同來源帳號註冊實施滑動視窗限流，防止暴力嘗試與異常刷量。
+- **嚴格 Bearer Token 授權**：移除未驗證 JWT 與 URL Query Token；MAC/IP 資訊不再單獨授予請求權限。
+- **會話安全與 CSRF/CORS**：登入會話 Cookie 設置 `HttpOnly`、`SameSite=Lax`；加入同源 CSRF、CORS 與可信 Proxy 檢查機制。
+- **管理員密碼安全**：採用 bcrypt 強雜湊加密存儲，停用預設弱密碼 `root`，強制要求至少 12 字元；支援於 `/permissions.html` 即時更新。
+- **金鑰與機密檔案權限**：Token、管理員密碼與 Registry 檔案一律以 `0600`（僅擁有者可讀寫）安全寫入。
+- **防刷與頻率防護**：針對短期內的 Token 重試與同來源帳號註冊實施滑動視窗限流，防止暴力嘗試與異常刷量。
 - **JWS 密鑰輪替容災與資料庫授權回溯**：當伺服器因重新啟動重新生成動態 JWS 簽署密鑰時，合法之既有 Agent 仍可經由資料庫授權紀錄完成校驗，確保工作階段平順還原。
-- **後端管理密碼維護**：支援於 `/permissions.html` 即時更新後端管理密碼，具備原密碼校驗與安全存儲。
+- **內容安全與防攻擊**：全面修補圖片 MIME 偽造、SVG XSS 注入與超大解壓圖片炸彈；修補管理頁儲存型 XSS；限制 Request Body、文章、標題與 Metadata 尺寸上限，禁止空文章與空留言。
+- **資料庫與 Store 競態防護**：修正 Store 內部並發資料競態、讀寫鎖誤用與結構體複製問題。
 
 所有 MCP 業務請求的身份取自 Bearer token 對應的 connection principal，伺服器會依 ACL 白名單/黑名單套用房間權限。
 

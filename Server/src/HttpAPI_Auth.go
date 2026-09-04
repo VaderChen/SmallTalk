@@ -26,7 +26,8 @@ type HttpAPI_auth struct {
 }
 
 const loginSessionTTLSec = 24 * 60 * 60
-const devShortTokenTTLSec = 10 * 365 * 24 * 60 * 60
+const devShortTokenTTLSec = 90 * 24 * 60 * 60
+const maxAuthRequestBodyBytes = 1 << 20
 
 const (
 	devLoginStatusSuccess      = "success"
@@ -37,14 +38,37 @@ const (
 )
 
 func (h *HttpAPI_auth) Process(w http.ResponseWriter, r *http.Request, jwt *MarsJSON.JSONObject, path []string, params *MarsJSON.JSONObject, body string) []byte {
+	if hasURLCredential(r) {
+		if w != nil {
+			w.WriteHeader(http.StatusBadRequest)
+		}
+		return mustJSON(ErrorResponse{Error: "credentials in URLs are not allowed"})
+	}
 	if body == "" {
-		b, _ := io.ReadAll(r.Body)
+		b, err := io.ReadAll(io.LimitReader(r.Body, maxAuthRequestBodyBytes+1))
+		if err != nil || len(b) > maxAuthRequestBodyBytes {
+			if w != nil {
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+			}
+			return mustJSON(ErrorResponse{Error: "request body too large"})
+		}
 		body = string(b)
+	} else if len(body) > maxAuthRequestBodyBytes {
+		if w != nil {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+		}
+		return mustJSON(ErrorResponse{Error: "request body too large"})
 	}
 	_ = jwt
 	_ = params
+	if !isSafeCookieMutation(r, h.Store) {
+		if w != nil {
+			w.WriteHeader(http.StatusForbidden)
+		}
+		return mustJSON(ErrorResponse{Error: "cross-origin request rejected"})
+	}
 
-	isPOST := strings.TrimSpace(body) != ""
+	isPOST := r.Method == http.MethodPost
 	p := splitPathFromBase(r.URL.Path, "/auth")
 	if len(p) == 0 {
 		return mustJSON(ErrorResponse{Error: "not found"})
@@ -56,7 +80,7 @@ func (h *HttpAPI_auth) Process(w http.ResponseWriter, r *http.Request, jwt *Mars
 		}
 		return mustJSON(map[string]string{"web_entry_path": entry})
 	}
-	if p[0] != "login" && p[0] != "projects" && p[0] != "devRegister" && p[0] != "devLogin" {
+	if p[0] != "login" && p[0] != "logout" && p[0] != "projects" && p[0] != "devRegister" && p[0] != "devLogin" {
 		if _, ok := requireAuthorizedRequest(r, jwt, h.Store); !ok {
 			return mustJSON(ErrorResponse{Error: "unauthorized"})
 		}
@@ -64,6 +88,16 @@ func (h *HttpAPI_auth) Process(w http.ResponseWriter, r *http.Request, jwt *Mars
 
 	if len(p) >= 1 && p[0] == "login" {
 		return h.handleLogin(w, r, body, isPOST)
+	}
+	if len(p) >= 1 && p[0] == "logout" {
+		return h.handleLogout(w, r)
+	}
+	if len(p) >= 1 && p[0] == "session" {
+		principal, ok := requireAuthorizedRequest(r, jwt, h.Store)
+		if !ok {
+			return mustJSON(ErrorResponse{Error: "unauthorized"})
+		}
+		return mustJSON(map[string]any{"ok": true, "client_id": principal.ClientID, "principal_type": principal.PrincipalType})
 	}
 	if len(p) >= 1 && p[0] == "projects" {
 		return h.handleProjects()
@@ -116,13 +150,12 @@ func (h *HttpAPI_auth) handleLogin(w http.ResponseWriter, r *http.Request, body 
 	}
 	if strings.TrimSpace(h.MarsCloudURL) == "" {
 		// 沒有 MARS Cloud 時，使用本機設定的預設帳密登入。
-		expectedPassword := strings.TrimSpace(h.DefaultPassword)
-		if h.Store != nil {
-			if p := h.Store.GetAdminPassword(); p != "" {
-				expectedPassword = p
-			}
+		passwordOK := h.Store != nil && h.Store.VerifyAdminPassword(req.Password)
+		if !passwordOK && (h.Store == nil || h.Store.GetAdminPassword() == "") {
+			fallbackPassword := strings.TrimSpace(h.DefaultPassword)
+			passwordOK = len([]rune(fallbackPassword)) >= minAdminPasswordLength && verifyAdminPasswordValue(fallbackPassword, req.Password)
 		}
-		if req.Account != strings.TrimSpace(h.DefaultAccount) || req.Password != expectedPassword {
+		if req.Account != strings.TrimSpace(h.DefaultAccount) || !passwordOK {
 			if h.Store != nil && h.Store.AuthRateLimiter != nil && sourceIP != "" {
 				h.Store.AuthRateLimiter.RecordFailure(sourceIP)
 			}
@@ -162,7 +195,8 @@ func (h *HttpAPI_auth) handleLogin(w http.ResponseWriter, r *http.Request, body 
 		Name:     "smalltalk_auth_token",
 		Value:    sessionToken,
 		Path:     "/",
-		HttpOnly: false,
+		HttpOnly: true,
+		Secure:   requestUsesHTTPS(r, h.Store),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   86400,
 	})
@@ -171,6 +205,7 @@ func (h *HttpAPI_auth) handleLogin(w http.ResponseWriter, r *http.Request, body 
 		Value:    req.Account,
 		Path:     "/",
 		HttpOnly: false,
+		Secure:   requestUsesHTTPS(r, h.Store),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   86400,
 	})
@@ -179,16 +214,44 @@ func (h *HttpAPI_auth) handleLogin(w http.ResponseWriter, r *http.Request, body 
 		Value:    proj,
 		Path:     "/",
 		HttpOnly: false,
+		Secure:   requestUsesHTTPS(r, h.Store),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   86400,
 	})
 
 	return mustJSON(AuthLoginResponse{
-		OK:        true,
-		Account:   req.Account,
-		Project:   proj,
-		AuthToken: sessionToken,
+		OK:      true,
+		Account: req.Account,
+		Project: proj,
 	})
+}
+
+func requestUsesHTTPS(r *http.Request, store *Store) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	peer := remoteHost(r)
+	return store != nil && store.isTrustedProxy(peer) && strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+}
+
+func (h *HttpAPI_auth) handleLogout(w http.ResponseWriter, r *http.Request) []byte {
+	if r.Method != http.MethodPost {
+		return mustJSON(ErrorResponse{Error: "method not allowed"})
+	}
+	secure := requestUsesHTTPS(r, h.Store)
+	for _, cookie := range []http.Cookie{
+		{Name: "smalltalk_auth_token", Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: -1},
+		{Name: "smalltalk_account", Path: "/", Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: -1},
+		{Name: "smalltalk_project", Path: "/", Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: -1},
+		{Name: "smalltalk_nickname", Path: "/", Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: -1},
+	} {
+		cookie := cookie
+		http.SetCookie(w, &cookie)
+	}
+	return mustJSON(map[string]any{"ok": true})
 }
 
 func (h *HttpAPI_auth) handleProjects() []byte {
@@ -370,6 +433,22 @@ func (h *HttpAPI_auth) handleDevLogin(r *http.Request, body string, isPOST bool)
 			Blocked:     entry.Blocked,
 			TokenIssued: entry.TokenIssued,
 			Message:     "MAC 地址不符。",
+		})
+	}
+	if !isRegisteredAgentSource(entry, sourceIP) {
+		if h.Store.AuthRateLimiter != nil && sourceIP != "" {
+			h.Store.AuthRateLimiter.RecordFailure(sourceIP)
+		}
+		return mustJSON(DevLoginResponse{
+			OK:          false,
+			Status:      devLoginStatusError,
+			Reason:      "source_mismatch",
+			ClientID:    entry.ClientID,
+			DisplayName: entry.DisplayName,
+			Approved:    entry.Approved,
+			Blocked:     entry.Blocked,
+			TokenIssued: entry.TokenIssued,
+			Message:     "登入來源與註冊來源不符，請使用既有 Token 或聯繫管理者輪替憑證。",
 		})
 	}
 	if !entry.Approved || !entry.TokenIssued || strings.TrimSpace(entry.Token) == "" {
@@ -608,23 +687,23 @@ func issueOrGetDevShortToken(store *Store, clientID string) (string, time.Time, 
 			issuedAt = time.Now()
 		}
 		if expiresAt.IsZero() {
-			expiresAt = issuedAt.Add(10 * 365 * 24 * time.Hour)
+			expiresAt = issuedAt.Add(time.Duration(devShortTokenTTLSec) * time.Second)
 		}
 		return strings.TrimSpace(entry.Token), issuedAt, expiresAt, nil
 	}
 
-	token, err := generateShortDevToken(16)
+	token, err := generateShortDevToken(32)
 	if err != nil {
 		return "", time.Time{}, time.Time{}, err
 	}
 	now := time.Now()
-	exp := now.Add(10 * 365 * 24 * time.Hour)
+	exp := now.Add(time.Duration(devShortTokenTTLSec) * time.Second)
 	return token, now, exp, nil
 }
 
 func isShortDevToken(token string) bool {
 	token = strings.TrimSpace(token)
-	return token != "" && len(token) < 20 && !strings.ContainsAny(token, " \t\r\n")
+	return token != "" && len(token) <= 64 && !strings.ContainsAny(token, " \t\r\n")
 }
 
 func generateShortDevToken(length int) (string, error) {

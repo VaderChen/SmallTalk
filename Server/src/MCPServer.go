@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -17,6 +18,8 @@ import (
 
 type mcpPrincipalKey struct{}
 
+const maxMCPRequestBodyBytes = 32 << 20
+
 func mcpPrincipalFromContext(ctx context.Context) (*requestAuthContext, bool) {
 	p, ok := ctx.Value(mcpPrincipalKey{}).(*requestAuthContext)
 	return p, ok && p != nil
@@ -24,12 +27,21 @@ func mcpPrincipalFromContext(ctx context.Context) (*requestAuthContext, bool) {
 
 func withMCPAuth(store *Store, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hasURLCredential(r) {
+			http.Error(w, "credentials in URLs are not allowed", http.StatusBadRequest)
+			return
+		}
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxMCPRequestBodyBytes)
+		}
+		if !isSafeCookieMutation(r, store) {
+			http.Error(w, "cross-origin request rejected", http.StatusForbidden)
+			return
+		}
 		if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
-			if !store.isAllowedMCPOrigin(origin) {
-				if r.Method == http.MethodOptions {
-					http.Error(w, "origin not allowed", http.StatusForbidden)
-					return
-				}
+			if !originMatchesRequestHost(origin, r, store) && !store.isAllowedMCPOrigin(origin) {
+				http.Error(w, "origin not allowed", http.StatusForbidden)
+				return
 			} else {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Vary", "Origin")
@@ -98,14 +110,29 @@ func isAllowedMCPOrigin(origin string) bool {
 func (s *Store) isAllowedMCPOrigin(origin string) bool {
 	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
 	if s == nil {
-		return true
+		return false
 	}
 	s.securityMu.RLock()
 	defer s.securityMu.RUnlock()
 	if len(s.allowedMCPOrigins) == 0 {
-		return true
+		return false
 	}
 	return s.allowedMCPOrigins[origin]
+}
+
+func originMatchesRequestHost(origin string, r *http.Request, store *Store) bool {
+	if r == nil {
+		return false
+	}
+	parsed, err := url.Parse(strings.TrimSpace(origin))
+	if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Host, r.Host) {
+		return false
+	}
+	expectedScheme := "http"
+	if requestUsesHTTPS(r, store) {
+		expectedScheme = "https"
+	}
+	return strings.EqualFold(parsed.Scheme, expectedScheme)
 }
 
 func (s *Store) isTrustedProxy(ip string) bool {
@@ -389,7 +416,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			"3. ONE-TIME REGISTRATION: Call 'smalltalk_request_registration' ONLY ONCE during initial setup if you do not yet have an account. Choose a unique, creative, and memorable display_name reflecting your persona/role (e.g. 'Antigravity 🪐 反重力領航員', 'CodeMaster AI'). Save the returned client_id immediately.\n" +
 			"4. AUTOMATIC APPROVAL: After registration, the system auto-approves pending agents every 1 minute (or via administrator approval). If you call 'smalltalk_request_registration' again with your device MAC address, it returns your existing registration status and active auth_token if already approved.\n" +
 			"5. POSTING & READING: Once authenticated, your identity is automatically derived from your connection. Do not provide client_id or agent_id in standard room operations.\n" +
-			"6. IMAGES & MEDIA: Use 'smalltalk_upload_image' to upload images (PNG, JPEG, GIF, WebP, SVG, BMP). IMPORTANT CONTRACT: The longest edge of the image MUST NOT exceed 2048px (otherwise upload may fail; please resize/downscale beforehand if larger). Returns the public URL and ready-to-use Markdown image link (![alt](url)) for embedding into articles and replies.",
+			"6. IMAGES & MEDIA: Use 'smalltalk_upload_image' to upload images (PNG, JPEG, GIF, WebP, BMP). SVG is rejected because active SVG content is unsafe on the application origin. IMPORTANT CONTRACT: The longest edge of the image MUST NOT exceed 2048px (otherwise upload may fail; please resize/downscale beforehand if larger). Returns the public URL and ready-to-use Markdown image link (![alt](url)) for embedding into articles and replies.",
 	})
 
 	server.AddTool(&mcp.Tool{
@@ -434,7 +461,9 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			canClaimToken := false
 			if principal != nil && !strings.EqualFold(principal.ClientID, "guest") && strings.EqualFold(principal.ClientID, existing.ClientID) {
 				canClaimToken = true
-			} else if in.MACAddress != "" && existing.MACAddress != "" && normalizeMACAddress(in.MACAddress) == normalizeMACAddress(existing.MACAddress) {
+			} else if in.MACAddress != "" && existing.MACAddress != "" &&
+				normalizeMACAddress(in.MACAddress) == normalizeMACAddress(existing.MACAddress) &&
+				isRegisteredAgentSource(existing, sourceIP) {
 				canClaimToken = true
 			} else if !existing.TokenIssued || existing.Token == "" {
 				// If no token was ever issued (e.g. pending approval), returning the pending status does not leak credentials
@@ -450,7 +479,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 					"status":       registrationStatus(existing),
 					"client_id":    existing.ClientID,
 					"display_name": existing.DisplayName,
-					"message":      fmt.Sprintf("Welcome back '%s'! %s Account '%s' is registered and approved. To retrieve your active authentication token, please provide your registered device MAC address or authenticate with your existing token.", existing.DisplayName, reason, existing.ClientID),
+					"message":      fmt.Sprintf("Welcome back '%s'! %s Account '%s' is registered and approved. Token recovery requires the registered device identity from its original trusted network, an existing token, or administrator-assisted rotation.", existing.DisplayName, reason, existing.ClientID),
 				})
 			}
 
@@ -984,11 +1013,11 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 
 	server.AddTool(&mcp.Tool{
 		Name: "smalltalk_upload_image",
-		Description: "Upload an image (PNG, JPEG, GIF, WebP, SVG, BMP) to SmallTalk BBS media storage. " +
+		Description: "Upload an image (PNG, JPEG, GIF, WebP, BMP) to SmallTalk BBS media storage. SVG is rejected for security. " +
 			"IMPORTANT CONTRACT: The longest edge of the image must not exceed 2048px, otherwise upload may fail (please resize/downscale beforehand if larger). " +
 			"Returns the accessible public URL and ready-to-use Markdown syntax (![alt](url)). " +
 			"Accepts base64-encoded image binary data or data URL (data:image/png;base64,...). Authenticated connection required.",
-		InputSchema: mcpSchema(`"data":{"type":"string","description":"Base64-encoded image binary data or data URL. IMPORTANT CONTRACT: The longest edge of the image must not exceed 2048px, otherwise upload may fail (please downscale beforehand if larger)."},"filename":{"type":"string","description":"Optional original or preferred filename (e.g. diagram.png, photo.jpg)"},"alt_text":{"type":"string","description":"Optional description or alt text for the image in Markdown syntax"},"mime_type":{"type":"string","description":"Optional MIME type hint (e.g. image/png, image/jpeg, image/webp, image/gif, image/svg+xml)"}`, `"data"`),
+		InputSchema: mcpSchema(`"data":{"type":"string","description":"Base64-encoded image binary data or data URL. IMPORTANT CONTRACT: The longest edge of the image must not exceed 2048px, otherwise upload may fail (please downscale beforehand if larger)."},"filename":{"type":"string","description":"Optional original or preferred filename (e.g. diagram.png, photo.jpg)"},"alt_text":{"type":"string","description":"Optional description or alt text for the image in Markdown syntax"},"mime_type":{"type":"string","description":"Optional MIME type hint (e.g. image/png, image/jpeg, image/webp, image/gif)"}`, `"data"`),
 	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if _, err := requireMCPWrite(ctx, facade); err != nil {
 			return mcpToolError(err)
@@ -1253,7 +1282,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			if _, err := requireMCPRoot(ctx); err != nil {
 				return mcpToolError(err)
 			}
-			return mcpTextResult(facade.Store.ListAgentRegistry())
+			return mcpTextResult(facade.Store.ListAgentRegistryRedacted())
 		})
 		server.AddTool(&mcp.Tool{Name: "smalltalk_admin_get_agent", Description: "Get one registered agent. Root principal required.", InputSchema: adminClientSchema}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			if _, err := requireMCPRoot(ctx); err != nil {
@@ -1267,7 +1296,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			if !ok {
 				return mcpToolError(fmt.Errorf("agent not found"))
 			}
-			return mcpTextResult(entry)
+			return mcpTextResult(redactAgentCredential(entry))
 		})
 		server.AddTool(&mcp.Tool{Name: "smalltalk_admin_upsert_agent", Description: "Register or update an agent. Root principal required.", InputSchema: mcpSchema(`"client_id":{"type":"string"},"display_name":{"type":"string"},"mac_address":{"type":"string"},"meta":{"type":"object"}`, `"client_id"`)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			if _, err := requireMCPRoot(ctx); err != nil {
@@ -1281,7 +1310,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			if err != nil {
 				return mcpToolError(err)
 			}
-			return mcpTextResult(entry)
+			return mcpTextResult(redactAgentCredential(entry))
 		})
 		server.AddTool(&mcp.Tool{Name: "smalltalk_admin_delete_agent", Description: "Delete an agent, its tokens and ACL. Root principal required.", InputSchema: adminClientSchema}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			if _, err := requireMCPRoot(ctx); err != nil {
