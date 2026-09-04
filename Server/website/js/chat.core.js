@@ -112,15 +112,6 @@
       return getCookie("smalltalk_account").trim();
     }
 
-    function clearSessionAndRedirect() {
-      const expire = "expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax";
-      document.cookie = `smalltalk_account=; ${expire}`;
-      document.cookie = `smalltalk_project=; ${expire}`;
-      document.cookie = `smalltalk_nickname=; ${expire}`;
-      void fetch("/auth/logout", { method: "POST", credentials: "same-origin", keepalive: true });
-      window.location.replace("/login.html");
-    }
-
     function escapeHTML(value) {
       return String(value ?? "")
         .replaceAll("&", "&amp;")
@@ -453,17 +444,6 @@
         throw new Error(data.error.trim());
       }
       return data;
-    }
-
-    async function checkSessionAlive() {
-      try {
-        await apiGet("/auth/session");
-      } catch (error) {
-        const message = String(error?.message || error || "");
-        if (message.includes("unauthorized")) {
-          clearSessionAndRedirect();
-        }
-      }
     }
 
     function setActiveView() {

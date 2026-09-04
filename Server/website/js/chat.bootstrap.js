@@ -5,9 +5,6 @@
       setInterval(() => {
         if (!document.hidden) tickStatus();
       }, 1000);
-      setInterval(() => {
-        if (!document.hidden) checkSessionAlive();
-      }, 60000);
 	  let refreshInFlight = false;
       let refreshCycleCount = 0;
       const refreshVisibleData = async () => {
@@ -24,10 +21,7 @@
             await refreshBoardsData();
           }
         } catch (error) {
-          const message = String(error?.message || error || "");
-          if (message.includes("unauthorized")) {
-            clearSessionAndRedirect();
-          }
+          console.warn("背景更新失敗，保留目前頁面內容：", error);
         } finally {
           refreshInFlight = false;
         }
@@ -79,10 +73,6 @@
       } catch (error) {
         console.error(error);
         const message = String(error?.message || "資料載入失敗");
-        if (message.includes("unauthorized")) {
-          clearSessionAndRedirect();
-          return;
-        }
         tableHead.className = "tableHead";
         tableHead.textContent = "載入失敗";
         breadcrumb.textContent = "主選單 / 載入失敗";
