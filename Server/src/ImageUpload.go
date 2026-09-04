@@ -129,6 +129,20 @@ func ProcessAndSaveImage(dataStr, originalFilename, altText, requestedMIME strin
 		return nil, fmt.Errorf("unsupported or unrecognized image format")
 	}
 
+	if isSVG {
+		svgLower := strings.ToLower(string(rawBytes))
+		if strings.Contains(svgLower, "<script") ||
+			strings.Contains(svgLower, "javascript:") ||
+			strings.Contains(svgLower, "onload=") ||
+			strings.Contains(svgLower, "onerror=") ||
+			strings.Contains(svgLower, "onclick=") ||
+			strings.Contains(svgLower, "onmouseover=") ||
+			strings.Contains(svgLower, "xlink:href=\"javascript") ||
+			strings.Contains(svgLower, "href=\"javascript") {
+			return nil, fmt.Errorf("SVG contains prohibited executable scripts or active event handlers")
+		}
+	}
+
 	width := 0
 	height := 0
 	resized := false

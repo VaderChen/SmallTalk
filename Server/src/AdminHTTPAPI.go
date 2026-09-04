@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -97,6 +99,49 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 			return mustJSON(ErrorResponse{Error: "method not allowed"})
 		}
 	}
+	if len(parts) == 1 && (parts[0] == "admin-password" || parts[0] == "backend-password") {
+		if r.Method != http.MethodPost {
+			return mustJSON(ErrorResponse{Error: "method not allowed"})
+		}
+		if strings.TrimSpace(body) == "" && r.Body != nil {
+			data, _ := io.ReadAll(r.Body)
+			body = string(data)
+		}
+		var req struct {
+			OldPassword     string `json:"old_password"`
+			NewPassword     string `json:"new_password"`
+			ConfirmPassword string `json:"confirm_password"`
+		}
+		if err := json.Unmarshal([]byte(body), &req); err != nil {
+			return mustJSON(ErrorResponse{Error: "資料格式錯誤"})
+		}
+		req.OldPassword = strings.TrimSpace(req.OldPassword)
+		req.NewPassword = strings.TrimSpace(req.NewPassword)
+		req.ConfirmPassword = strings.TrimSpace(req.ConfirmPassword)
+
+		if req.OldPassword == "" {
+			return mustJSON(ErrorResponse{Error: "請輸入目前密碼"})
+		}
+		if len(req.NewPassword) < 4 {
+			return mustJSON(ErrorResponse{Error: "新密碼長度至少需 4 個字元"})
+		}
+		if req.ConfirmPassword != "" && req.NewPassword != req.ConfirmPassword {
+			return mustJSON(ErrorResponse{Error: "兩次輸入的新密碼不一致"})
+		}
+
+		currentPwd := api.Store.GetAdminPassword()
+		if req.OldPassword != currentPwd {
+			return mustJSON(ErrorResponse{Error: "目前密碼輸入錯誤，請重新確認"})
+		}
+
+		if err := api.Store.SetAdminPassword(req.NewPassword); err != nil {
+			return mustJSON(ErrorResponse{Error: "更新密碼失敗: " + err.Error()})
+		}
+		return mustJSON(map[string]any{
+			"ok":      true,
+			"message": "後端管理者密碼已成功更新！請妥善保管新密碼。",
+		})
+	}
 	if len(parts) == 1 && parts[0] == "rooms" {
 		if r.Method != http.MethodGet {
 			return mustJSON(ErrorResponse{Error: "method not allowed"})
@@ -140,6 +185,56 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 			return mustJSON(ErrorResponse{Error: err.Error()})
 		}
 		return mustJSON(map[string]any{"ok": true, "room": updated})
+	}
+	if len(parts) >= 2 && parts[0] == "rooms" && (parts[1] == "create" || parts[1] == "new") {
+		if r.Method != http.MethodPost {
+			return mustJSON(ErrorResponse{Error: "method not allowed"})
+		}
+		if strings.TrimSpace(body) == "" && r.Body != nil {
+			data, _ := io.ReadAll(r.Body)
+			body = string(data)
+		}
+		var req struct {
+			ProjectID   string `json:"project_id"`
+			RoomID      string `json:"room_id"`
+			Room        string `json:"room"`
+			Name        string `json:"name"`
+			Category    string `json:"category"`
+			Description string `json:"description"`
+			Owner       string `json:"owner"`
+			Pinned      bool   `json:"pinned"`
+		}
+		if err := json.Unmarshal([]byte(body), &req); err != nil {
+			return mustJSON(ErrorResponse{Error: "invalid json"})
+		}
+		roomID := strings.TrimSpace(firstNonEmpty(req.RoomID, req.Room))
+		projectID := strings.TrimSpace(req.ProjectID)
+		if strings.Contains(roomID, "/") {
+			p := strings.SplitN(roomID, "/", 2)
+			projectID = p[0]
+			roomID = p[1]
+		} else if projectID == "" {
+			projectID = "default"
+		}
+		if roomID == "" {
+			return mustJSON(ErrorResponse{Error: "看板代碼 (Room ID) 不可為空"})
+		}
+		matched, _ := regexp.MatchString(`^[a-zA-Z0-9_-]+$`, roomID)
+		if !matched {
+			return mustJSON(ErrorResponse{Error: "看板代碼僅限英數字、連字號與底線 (a-z, 0-9, -, _)"})
+		}
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			name = roomID
+		}
+		newRoom, err := api.Store.CreateRoomFull(projectID, roomID, name, strings.TrimSpace(req.Category), strings.TrimSpace(req.Description), strings.TrimSpace(req.Owner), req.Pinned)
+		if err != nil {
+			if errors.Is(err, ErrAlreadyExists) {
+				return mustJSON(ErrorResponse{Error: "此看板代碼已存在，請使用其他代碼"})
+			}
+			return mustJSON(ErrorResponse{Error: err.Error()})
+		}
+		return mustJSON(map[string]any{"ok": true, "room": newRoom})
 	}
 	if len(parts) == 2 && parts[1] == "read-only" {
 		if r.Method != http.MethodPost {

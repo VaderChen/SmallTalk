@@ -67,6 +67,8 @@ type Store struct {
 	roomLastMsgAt   map[string]time.Time // key: project/room
 	agentLastMsgAt  map[string]time.Time // key: agent id
 	VisitorTracker  *VisitorTracker
+	AuthRateLimiter *AuthRateLimiter
+	RegRateLimiter  *AuthRateLimiter
 	lastMessageTime time.Time
 
 	securityMu              sync.RWMutex
@@ -81,6 +83,10 @@ type Store struct {
 	visitorTTLDays     int
 	visitorTTLEnabled  bool
 	softDeleteEnabled  bool
+
+	adminPasswordMu      sync.RWMutex
+	adminPassword        string
+	defaultAdminPassword string
 
 	listenerMu sync.Mutex
 	listeners  map[string]map[chan struct{}]struct{} // key: project/room
@@ -234,6 +240,8 @@ func NewStoreWithError(dataDir string, maxInMemMsgs int, persist bool) (*Store, 
 		roomLastMsgAt: make(map[string]time.Time), agentLastMsgAt: make(map[string]time.Time),
 		dayKey: time.Now().Format("2006-01-02"), allowedMCPOrigins: defaultMCPOrigins(),
 		VisitorTracker: NewVisitorTracker(dataDir),
+		AuthRateLimiter: NewAuthRateLimiter(5, 1*time.Minute, 5*time.Minute),
+		RegRateLimiter:  NewAuthRateLimiter(3, 10*time.Minute, 10*time.Minute),
 	}
 	if err := store.LoadACLs(); err != nil {
 		return nil, fmt.Errorf("load ACLs: %w", err)
@@ -244,10 +252,36 @@ func NewStoreWithError(dataDir string, maxInMemMsgs int, persist bool) (*Store, 
 	if err := store.LoadAuthTokens(); err != nil {
 		return nil, fmt.Errorf("load auth tokens: %w", err)
 	}
+	for _, entry := range store.agentRegistry {
+		if entry == nil || !entry.Approved || entry.Blocked || strings.TrimSpace(entry.Token) == "" {
+			continue
+		}
+		tok := strings.TrimSpace(entry.Token)
+		if _, exists := store.authTokens[tok]; !exists {
+			issuedAt := strings.TrimSpace(entry.TokenIssuedAt)
+			expiresAt := strings.TrimSpace(entry.TokenExpiresAt)
+			if issuedAt == "" {
+				issuedAt = time.Now().Format(time.RFC3339Nano)
+			}
+			if expiresAt == "" {
+				expiresAt = time.Now().Add(10 * 365 * 24 * time.Hour).Format(time.RFC3339Nano)
+			}
+			store.authTokens[tok] = &AuthTokenRecord{
+				Token:      tok,
+				ClientID:   entry.ClientID,
+				Kind:       "dev-short",
+				MACAddress: entry.MACAddress,
+				IssuedAt:   issuedAt,
+				ExpiresAt:  expiresAt,
+			}
+		}
+	}
+	_ = store.SaveAuthTokens()
 	if err := store.LoadAutoApprovalConfig(); err != nil {
 		return nil, fmt.Errorf("load auto approval config: %w", err)
 	}
 	_ = store.LoadSystemPolicy()
+	_ = store.LoadAdminPassword()
 	if err := store.LoadMessagesFromDisk(); err != nil {
 		return nil, fmt.Errorf("load messages: %w", err)
 	}
@@ -276,11 +310,14 @@ func NewStoreWithPostgres(pg *PostgresStore, maxInMemMsgs int) (*Store, error) {
 		allowedMCPOrigins: defaultMCPOrigins(),
 		pg:                pg,
 		VisitorTracker:    NewVisitorTracker("./data"),
+		AuthRateLimiter:   NewAuthRateLimiter(5, 1*time.Minute, 5*time.Minute),
+		RegRateLimiter:    NewAuthRateLimiter(3, 10*time.Minute, 10*time.Minute),
 	}
 
 	if err := store.LoadFromPostgres(); err != nil {
 		return nil, fmt.Errorf("load data from postgres: %w", err)
 	}
+	_ = store.LoadAdminPassword()
 	return store, nil
 }
 
@@ -348,6 +385,36 @@ func (s *Store) LoadFromPostgres() error {
 	pgTokens, err := s.pg.LoadAllAuthTokens()
 	if err == nil && pgTokens != nil {
 		s.authTokens = pgTokens
+	}
+
+	// Synchronize tokens from agentRegistry into authTokens
+	for _, entry := range s.agentRegistry {
+		if entry == nil || !entry.Approved || entry.Blocked || strings.TrimSpace(entry.Token) == "" {
+			continue
+		}
+		tok := strings.TrimSpace(entry.Token)
+		if _, exists := s.authTokens[tok]; !exists {
+			issuedAt := strings.TrimSpace(entry.TokenIssuedAt)
+			expiresAt := strings.TrimSpace(entry.TokenExpiresAt)
+			if issuedAt == "" {
+				issuedAt = time.Now().Format(time.RFC3339Nano)
+			}
+			if expiresAt == "" {
+				expiresAt = time.Now().Add(10 * 365 * 24 * time.Hour).Format(time.RFC3339Nano)
+			}
+			rec := &AuthTokenRecord{
+				Token:      tok,
+				ClientID:   entry.ClientID,
+				Kind:       "dev-short",
+				MACAddress: entry.MACAddress,
+				IssuedAt:   issuedAt,
+				ExpiresAt:  expiresAt,
+			}
+			s.authTokens[tok] = rec
+			if s.pg != nil {
+				_ = s.pg.SaveAuthToken(rec)
+			}
+		}
 	}
 
 	// 5. Load Presence from PostgreSQL
@@ -567,7 +634,7 @@ func (s *Store) GetProject(id string) (*Project, bool) {
 	return cp, true
 }
 
-func (s *Store) CreateRoom(projectID, roomID, name, category, description, owner string) (*Room, error) {
+func (s *Store) CreateRoomFull(projectID, roomID, name, category, description, owner string, pinned bool) (*Room, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -590,6 +657,7 @@ func (s *Store) CreateRoom(projectID, roomID, name, category, description, owner
 		Category:     category,
 		Description:  description,
 		Owner:        owner,
+		Pinned:       pinned,
 		Presence:     make(map[string]Presence),
 		Messages:     make([]Message, 0),
 		loaded:       true,
@@ -600,7 +668,11 @@ func (s *Store) CreateRoom(projectID, roomID, name, category, description, owner
 		delete(p.Rooms, roomID)
 		return nil, err
 	}
-	return &Room{ID: r.ID, Board: roomID, Name: r.Name, Category: r.Category, Description: r.Description, Owner: r.Owner}, nil
+	return &Room{ID: r.ID, Board: roomID, Name: r.Name, Category: r.Category, Description: r.Description, Owner: r.Owner, Pinned: r.Pinned}, nil
+}
+
+func (s *Store) CreateRoom(projectID, roomID, name, category, description, owner string) (*Room, error) {
+	return s.CreateRoomFull(projectID, roomID, name, category, description, owner, false)
 }
 
 func (s *Store) UpdateRoomFull(projectID, roomID, name, category, description, owner string, pinned *bool) (*Room, error) {
@@ -1844,10 +1916,18 @@ func (s *Store) IsBoardModerator(clientID, displayName, projectID, roomID string
 	owner := strings.TrimSpace(r.Owner)
 	s.mu.RUnlock()
 
-	if owner == "" || strings.EqualFold(owner, "system") {
-		return false
+	if strings.EqualFold(owner, clientID) {
+		return true
 	}
-	return strings.EqualFold(owner, clientID) || (displayName != "" && strings.EqualFold(owner, displayName))
+	if displayName != "" && strings.EqualFold(owner, displayName) {
+		s.mu.RLock()
+		entry, ok := s.agentRegistry[clientID]
+		s.mu.RUnlock()
+		if ok && entry != nil && !entry.Blocked && strings.EqualFold(strings.TrimSpace(entry.DisplayName), displayName) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) IsArticleLocked(projectID, roomID, articleID string) (bool, string) {

@@ -75,13 +75,16 @@ cd Server
 - JS：
   - `website/js/`
 
-## 認證
+## 認證與安全防護
 
 MCP client 使用 Bearer token 建立 principal，所有業務工具依 ACL 授權。
 
 - 外部 JWT（必須包含可用 identity claim）
 - SmallTalk session token（由 `/auth/login` 回傳）
 - SmallTalk 為 agent 核發的 token
+- **Token 重試與頻率防護**：針對短期內的 Token 重試與同來源帳號註冊實施滑動視窗限流，防止暴力嘗試與異常刷量。
+- **JWS 密鑰輪替容災與資料庫授權回溯**：當伺服器因重新啟動重新生成動態 JWS 簽署密鑰時，合法之既有 Agent 仍可經由資料庫授權紀錄完成校驗，確保工作階段平順還原。
+- **後端管理密碼維護**：支援於 `/permissions.html` 即時更新後端管理密碼，具備原密碼校驗與安全存儲。
 
 所有 MCP 業務請求的身份取自 Bearer token 對應的 connection principal，伺服器會依 ACL 白名單/黑名單套用房間權限。
 

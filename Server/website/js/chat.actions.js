@@ -635,3 +635,121 @@
         move(-steps);
       }
     }, { passive: false });
+
+    // Touch gesture support for tablets and mobile devices
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchLastY = 0;
+    let touchStartTime = 0;
+    let isTouchDragging = false;
+    let touchAccumulatorY = 0;
+
+    document.addEventListener("touchstart", (event) => {
+      if (
+        (dlgBoard && dlgBoard.open) ||
+        (dlgArticle && dlgArticle.open) ||
+        (dlgReply && dlgReply.open) ||
+        (dlgSearch && dlgSearch.open) ||
+        (dlgConfirm && dlgConfirm.open)
+      ) {
+        return;
+      }
+      if (event.touches.length !== 1) return;
+      const t = event.touches[0];
+      touchStartX = t.clientX;
+      touchStartY = t.clientY;
+      touchLastY = t.clientY;
+      touchStartTime = performance.now();
+      isTouchDragging = false;
+      touchAccumulatorY = 0;
+    }, { passive: true });
+
+    document.addEventListener("touchmove", (event) => {
+      if (
+        (dlgBoard && dlgBoard.open) ||
+        (dlgArticle && dlgArticle.open) ||
+        (dlgReply && dlgReply.open) ||
+        (dlgSearch && dlgSearch.open) ||
+        (dlgConfirm && dlgConfirm.open)
+      ) {
+        return;
+      }
+      if (event.touches.length !== 1) return;
+      const t = event.touches[0];
+      const deltaY = t.clientY - touchLastY;
+      const totalDeltaX = Math.abs(t.clientX - touchStartX);
+      const totalDeltaY = Math.abs(t.clientY - touchStartY);
+
+      if (totalDeltaY > 8 || totalDeltaX > 8) {
+        isTouchDragging = true;
+      }
+
+      // If in article view, allow native smooth touch scrolling for reading
+      if (isArticleLevel()) {
+        touchLastY = t.clientY;
+        return;
+      }
+
+      // In list views (boards, threads, menu, search), vertical swipe moves selection and scrolls
+      touchAccumulatorY += deltaY;
+      touchLastY = t.clientY;
+
+      const threshold = 26; // approx 1 row height
+      if (touchAccumulatorY >= threshold) {
+        // Finger swipes DOWN -> move cursor DOWN
+        const steps = Math.min(3, Math.floor(touchAccumulatorY / threshold));
+        touchAccumulatorY %= threshold;
+        move(steps);
+      } else if (touchAccumulatorY <= -threshold) {
+        // Finger swipes UP -> move cursor UP
+        const steps = Math.min(3, Math.floor(Math.abs(touchAccumulatorY) / threshold));
+        touchAccumulatorY = -(Math.abs(touchAccumulatorY) % threshold);
+        move(-steps);
+      }
+    }, { passive: true });
+
+    document.addEventListener("touchend", (event) => {
+      if (
+        (dlgBoard && dlgBoard.open) ||
+        (dlgArticle && dlgArticle.open) ||
+        (dlgReply && dlgReply.open) ||
+        (dlgSearch && dlgSearch.open) ||
+        (dlgConfirm && dlgConfirm.open)
+      ) {
+        return;
+      }
+      if (!isTouchDragging) return;
+
+      // Handle horizontal swipe: swipe right to go back, swipe left to enter
+      const t = event.changedTouches ? event.changedTouches[0] : null;
+      if (t) {
+        const deltaX = t.clientX - touchStartX;
+        const deltaY = t.clientY - touchStartY;
+        const duration = performance.now() - touchStartTime;
+        if (Math.abs(deltaX) > 70 && Math.abs(deltaX) > Math.abs(deltaY) * 1.6 && duration < 600) {
+          if (deltaX > 0) {
+            // Swipe right -> Back
+            if (state.level === "menu") {
+              window.location.href = "/main.html";
+            } else {
+              backPrevLevel();
+            }
+          } else if (deltaX < 0 && !isArticleLevel()) {
+            // Swipe left -> Enter
+            enterNextLevel();
+          }
+        }
+      }
+
+      setTimeout(() => {
+        isTouchDragging = false;
+      }, 100);
+    }, { passive: true });
+
+    // Suppress accidental row clicks after a swipe gesture
+    document.addEventListener("click", (event) => {
+      if (isTouchDragging) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+    }, true);

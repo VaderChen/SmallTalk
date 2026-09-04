@@ -301,6 +301,7 @@
       renderAutoApproval(autoApprovalResp.enabled, autoApprovalResp.interval_minutes);
       if (policyResp) renderSystemPolicy(policyResp);
       await renderRegistry();
+      loadMonitorStats();
     }
 
     function setTab(tab) {
@@ -864,6 +865,7 @@
     $('btnCloseBoardDialog')?.addEventListener('click', () => $('boardDialog').close());
     $('btnCancelBoardDialog')?.addEventListener('click', () => $('boardDialog').close());
     $('btnSaveBoardSettings')?.addEventListener('click', saveBoardSettings);
+    $('btnCreateBoard')?.addEventListener('click', openCreateBoardDialog);
 
     // Feature Tabs Switching
     const FEATURE_DESCRIPTIONS = {
@@ -959,75 +961,139 @@
       }
     });
 
+    let currentBoardDialogMode = 'edit';
+
+    function populateBoardModeratorSelect(currentOwner = '') {
+      const ownerSelect = $('boardOwnerSelect');
+      if (!ownerSelect) return;
+      ownerSelect.innerHTML = `
+        <option value="system">system (系統管理)</option>
+        <option value="">(未指定)</option>
+      `;
+      currentOwner = (currentOwner || '').trim();
+      let foundCurrent = (currentOwner === 'system' || currentOwner === '');
+
+      // 收集所有已擔任任何看板版主的名稱與 ID
+      const activeModSet = new Set();
+      allRooms.forEach(room => {
+        if (room.owner && room.owner !== 'system') {
+          activeModSet.add(room.owner.trim());
+        }
+      });
+
+      // 篩選出具有版主或系統管理資格之帳號
+      const qualifiedAgents = (registry || []).filter(agent => {
+        const cid = (agent.client_id || agent.clientId || '').trim();
+        const name = (agent.display_name || agent.displayName || '').trim();
+        const isAdmin = !!agent.is_admin || cid.toLowerCase() === 'root';
+        const isMod = activeModSet.has(cid) || (name && activeModSet.has(name));
+        const isCurrent = (cid && cid === currentOwner) || (name && name === currentOwner);
+        return isAdmin || isMod || isCurrent;
+      });
+
+      qualifiedAgents.forEach(agent => {
+        const cid = (agent.client_id || agent.clientId || '').trim();
+        if (!cid) return;
+        const name = (agent.display_name || agent.displayName || '').trim();
+        const isAdmin = !!agent.is_admin || cid.toLowerCase() === 'root';
+        const isMod = activeModSet.has(cid) || (name && activeModSet.has(name));
+        
+        let roleTag = '';
+        if (isAdmin && isMod) roleTag = ' [管理員+版主]';
+        else if (isAdmin) roleTag = ' [系統管理員]';
+        else if (isMod) roleTag = ' [看板版主]';
+
+        const opt = document.createElement('option');
+        opt.value = cid;
+        opt.textContent = (name && name !== cid ? `${name} (${cid})` : cid) + roleTag;
+        if (cid === currentOwner || (name && name === currentOwner)) {
+          foundCurrent = true;
+        }
+        ownerSelect.appendChild(opt);
+      });
+
+      if (currentOwner && !foundCurrent) {
+        const customOpt = document.createElement('option');
+        customOpt.value = currentOwner;
+        customOpt.textContent = `${currentOwner} (自訂)`;
+        ownerSelect.appendChild(customOpt);
+      }
+      ownerSelect.value = currentOwner;
+    }
+
+    function openCreateBoardDialog() {
+      currentBoardDialogMode = 'create';
+      const titleEl = $('boardDialogTitle');
+      if (titleEl) titleEl.textContent = '新增討論看板';
+      const subEl = $('boardDialogSubText');
+      if (subEl) subEl.textContent = '建立全新討論看板，設定英文代碼、中文名稱、分類與指派版主。';
+
+      const idInput = $('boardIDInput');
+      if (idInput) {
+        idInput.readOnly = false;
+        idInput.style.background = '';
+        idInput.style.color = '';
+        idInput.value = '';
+        idInput.placeholder = '例如：tech、chat、ai-art';
+      }
+      const idHint = $('boardIDHint');
+      if (idHint) idHint.style.display = 'block';
+
+      $('boardNameInput').value = '';
+      $('boardCategoryInput').value = '';
+      $('boardDescInput').value = '';
+      if ($('boardPinnedSwitch')) $('boardPinnedSwitch').checked = false;
+      if ($('btnSaveBoardSettings')) $('btnSaveBoardSettings').textContent = '確認建立';
+
+      populateBoardModeratorSelect('');
+
+      const alertEl = $('boardReservedAlert');
+      if (alertEl) alertEl.style.display = 'none';
+
+      const msgEl = $('boardMessage');
+      if (msgEl) {
+        msgEl.textContent = '';
+        msgEl.className = 'message';
+      }
+
+      const dlg = $('boardDialog');
+      if (dlg) {
+        if (typeof dlg.showModal === 'function') dlg.showModal();
+        else dlg.setAttribute('open', '');
+      }
+      setTimeout(() => idInput?.focus(), 50);
+    }
+
     function openBoardDialog(roomKey) {
       if (!roomKey) return;
+      currentBoardDialogMode = 'edit';
+      const titleEl = $('boardDialogTitle');
+      if (titleEl) titleEl.textContent = '看板版面設定';
+      const subEl = $('boardDialogSubText');
+      if (subEl) subEl.textContent = '修改看板顯示名稱、分類標籤、版主指定與主題版規。';
+
       const r = allRooms.find(item => item.room === roomKey || item.room_id === roomKey || `${item.project_id}/${item.room_id}` === roomKey) || { room: roomKey, room_id: roomKey };
 
       const fullRoom = r.room || roomKey;
-      $('boardIDInput').value = fullRoom;
+      const idInput = $('boardIDInput');
+      if (idInput) {
+        idInput.readOnly = true;
+        idInput.style.background = 'rgba(15,23,42,0.04)';
+        idInput.style.color = 'var(--muted)';
+        idInput.value = fullRoom;
+      }
+      const idHint = $('boardIDHint');
+      if (idHint) idHint.style.display = 'none';
+
       $('boardNameInput').value = r.name || r.room_id || fullRoom;
       $('boardCategoryInput').value = r.category || (r.project_id && r.project_id !== 'default' ? r.project_id : (r.project && r.project !== 'default' ? r.project : ''));
       $('boardDescInput').value = r.description || '';
       if ($('boardPinnedSwitch')) {
         $('boardPinnedSwitch').checked = isPinnedBoard(r);
       }
+      if ($('btnSaveBoardSettings')) $('btnSaveBoardSettings').textContent = '儲存設定';
 
-      const ownerSelect = $('boardOwnerSelect');
-      if (ownerSelect) {
-        ownerSelect.innerHTML = `
-          <option value="system">system (系統管理)</option>
-          <option value="">(未指定)</option>
-        `;
-        const currentOwner = (r.owner || '').trim();
-        let foundCurrent = (currentOwner === 'system' || currentOwner === '');
-
-        // 收集所有已擔任任何看板版主的名稱與 ID
-        const activeModSet = new Set();
-        allRooms.forEach(room => {
-          if (room.owner && room.owner !== 'system') {
-            activeModSet.add(room.owner.trim());
-          }
-        });
-
-        // 只篩選出具有版主或系統管理資格之帳號
-        const qualifiedAgents = (registry || []).filter(agent => {
-          const cid = (agent.client_id || agent.clientId || '').trim();
-          const name = (agent.display_name || agent.displayName || '').trim();
-          const isAdmin = !!agent.is_admin || cid.toLowerCase() === 'root';
-          const isMod = activeModSet.has(cid) || (name && activeModSet.has(name));
-          const isCurrent = (cid && cid === currentOwner) || (name && name === currentOwner);
-          return isAdmin || isMod || isCurrent;
-        });
-
-        qualifiedAgents.forEach(agent => {
-          const cid = (agent.client_id || agent.clientId || '').trim();
-          if (!cid) return;
-          const name = (agent.display_name || agent.displayName || '').trim();
-          const isAdmin = !!agent.is_admin || cid.toLowerCase() === 'root';
-          const isMod = activeModSet.has(cid) || (name && activeModSet.has(name));
-          
-          let roleTag = '';
-          if (isAdmin && isMod) roleTag = ' [管理員+版主]';
-          else if (isAdmin) roleTag = ' [系統管理員]';
-          else if (isMod) roleTag = ' [看板版主]';
-
-          const opt = document.createElement('option');
-          opt.value = cid;
-          opt.textContent = (name && name !== cid ? `${name} (${cid})` : cid) + roleTag;
-          if (cid === currentOwner || (name && name === currentOwner)) {
-            foundCurrent = true;
-          }
-          ownerSelect.appendChild(opt);
-        });
-
-        if (currentOwner && !foundCurrent) {
-          const customOpt = document.createElement('option');
-          customOpt.value = currentOwner;
-          customOpt.textContent = `${currentOwner} (自訂)`;
-          ownerSelect.appendChild(customOpt);
-        }
-        ownerSelect.value = currentOwner;
-      }
+      populateBoardModeratorSelect(r.owner || '');
 
       const isReserved = (fullRoom === 'default/visitors' || fullRoom === 'default/announce' || fullRoom === 'default/lobby' || r.room_id === 'visitors' || r.room_id === 'announce' || r.room_id === 'lobby');
       const alertEl = $('boardReservedAlert');
@@ -1059,23 +1125,53 @@
       const description = $('boardDescInput').value.trim();
       const pinned = $('boardPinnedSwitch') ? $('boardPinnedSwitch').checked : false;
       const msgEl = $('boardMessage');
+
+      if (currentBoardDialogMode === 'create') {
+        if (!roomKey) {
+          if (msgEl) {
+            msgEl.textContent = '請輸入看板代碼 (Room ID)';
+            msgEl.className = 'message error';
+          }
+          $('boardIDInput')?.focus();
+          return;
+        }
+        if (!/^[a-zA-Z0-9_-]+$/.test(roomKey)) {
+          if (msgEl) {
+            msgEl.textContent = '看板代碼僅限英數字、連字號與底線 (a-z, 0-9, -, _)';
+            msgEl.className = 'message error';
+          }
+          $('boardIDInput')?.focus();
+          return;
+        }
+      }
+
       if (msgEl) {
-        msgEl.textContent = '儲存中...';
+        msgEl.textContent = currentBoardDialogMode === 'create' ? '看板建立中...' : '儲存中...';
         msgEl.className = 'message';
       }
 
       try {
-        const res = await apiPost('/permissions/rooms/update', {
+        const endpoint = currentBoardDialogMode === 'create' ? '/permissions/rooms/create' : '/permissions/rooms/update';
+        const payload = currentBoardDialogMode === 'create' ? {
+          room_id: roomKey,
+          name: name || roomKey,
+          category: category,
+          owner: owner,
+          description: description,
+          pinned: pinned
+        } : {
           room: roomKey,
           name: name,
           category: category,
           owner: owner,
           description: description,
           pinned: pinned
-        });
+        };
+
+        const res = await apiPost(endpoint, payload);
         if (res && res.ok) {
           if (msgEl) {
-            msgEl.textContent = '看板設定儲存成功！';
+            msgEl.textContent = currentBoardDialogMode === 'create' ? '看板建立成功！' : '看板設定儲存成功！';
             msgEl.className = 'message success';
           }
           await renderBoardsTab(true);
@@ -1083,7 +1179,7 @@
             $('boardDialog').close();
           }, 600);
         } else {
-          throw new Error(res.error || '儲存失敗');
+          throw new Error(res.error || (currentBoardDialogMode === 'create' ? '建立看板失敗' : '儲存失敗'));
         }
       } catch (err) {
         if (msgEl) {
@@ -1560,6 +1656,88 @@
         updateSystemPolicy({ soft_delete_enabled: e.target.checked });
       });
     }
+
+    const btnUpdatePwd = $('btnUpdateAdminPassword');
+    if (btnUpdatePwd) {
+      btnUpdatePwd.addEventListener('click', async () => {
+        const oldInput = $('adminOldPassword');
+        const newInput = $('adminNewPassword');
+        const confirmInput = $('adminConfirmPassword');
+        const msgEl = $('adminPasswordMessage');
+
+        const oldPassword = oldInput?.value || '';
+        const newPassword = newInput?.value || '';
+        const confirmPassword = confirmInput?.value || '';
+
+        if (!oldPassword) {
+          if (msgEl) {
+            msgEl.textContent = '請輸入目前密碼';
+            msgEl.className = 'message error';
+            msgEl.style.display = 'block';
+          }
+          oldInput?.focus();
+          return;
+        }
+
+        if (newPassword.length < 4) {
+          if (msgEl) {
+            msgEl.textContent = '新密碼長度至少需 4 個字元';
+            msgEl.className = 'message error';
+            msgEl.style.display = 'block';
+          }
+          newInput?.focus();
+          return;
+        }
+
+        if (newPassword !== confirmPassword) {
+          if (msgEl) {
+            msgEl.textContent = '兩次輸入的新密碼不一致';
+            msgEl.className = 'message error';
+            msgEl.style.display = 'block';
+          }
+          confirmInput?.focus();
+          return;
+        }
+
+        btnUpdatePwd.disabled = true;
+        try {
+          const res = await apiPost('/permissions/admin-password', {
+            old_password: oldPassword,
+            new_password: newPassword,
+            confirm_password: confirmPassword
+          });
+          if (msgEl) {
+            msgEl.textContent = res.message || '後端管理者密碼已成功更新！';
+            msgEl.className = 'message success';
+            msgEl.style.display = 'block';
+          }
+          if (oldInput) oldInput.value = '';
+          if (newInput) newInput.value = '';
+          if (confirmInput) confirmInput.value = '';
+          setTimeout(() => { if (msgEl) msgEl.style.display = 'none'; }, 4000);
+        } catch (err) {
+          if (msgEl) {
+            msgEl.textContent = err.message || '更新密碼失敗';
+            msgEl.className = 'message error';
+            msgEl.style.display = 'block';
+          }
+        } finally {
+          btnUpdatePwd.disabled = false;
+        }
+      });
+    }
+
+    ['adminOldPassword', 'adminNewPassword', 'adminConfirmPassword'].forEach((id) => {
+      const el = $(id);
+      if (el) {
+        el.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            $('btnUpdateAdminPassword')?.click();
+          }
+        });
+      }
+    });
 
     loadAll().catch((error) => {
       $('pageMessage').textContent = error.message;

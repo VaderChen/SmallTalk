@@ -166,10 +166,16 @@ PLIST
 
 echo -n "APPLSMTK" > "$CONTENTS_DIR/PkgInfo"
 
-# Ad-hoc codesign
-if command -v codesign >/dev/null 2>&1; then
-	codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
+# 套用簽章
+CODESIGN_IDENTITY="${SMALLTALK_CODESIGN_IDENTITY:-}"
+if [[ -n "$CODESIGN_IDENTITY" && "$CODESIGN_IDENTITY" != "-" ]] && command -v codesign >/dev/null 2>&1; then
+	print "套用 Developer ID 簽章與 Hardened Runtime：$CODESIGN_IDENTITY"
+	codesign --force --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "$MACOS_DIR/SmallTalkServer"
+	codesign --force --deep --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "$APP_DIR"
 	print "已完成 macOS App 簽章"
+elif command -v codesign >/dev/null 2>&1; then
+	codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
+	print "已完成 macOS App 簽章 (ad-hoc)"
 fi
 
 # 產生 SHA256SUMS

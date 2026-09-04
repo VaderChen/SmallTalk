@@ -1,30 +1,109 @@
-    @media (max-width: 980px) {
-      .boardHead,
-      .boardRow {
-        grid-template-columns: 22px 56px 180px 60px minmax(130px, 1fr) 56px 80px;
-        font-size: 13px;
-      }
+/* Tablet & Medium Screens (max-width: 1024px) */
+@media (max-width: 1024px) {
+  .boardHead,
+  .boardRow {
+    grid-template-columns: 20px 52px 160px 56px minmax(120px, 1fr) 52px 110px;
+    column-gap: 6px;
+    font-size: 13px;
+    padding: 1px 6px;
+  }
 
-      .threadHead,
-      .threadRow {
-        grid-template-columns: 22px 56px 96px 240px minmax(0, 1fr) 56px 52px;
-        font-size: 13px;
-      }
+  .threadHead,
+  .threadRow {
+    grid-template-columns: 20px 52px 84px 120px minmax(100px, 1fr) 52px 48px;
+    column-gap: 6px;
+    font-size: 13px;
+    padding: 1px 6px;
+  }
 
-      .articleHeaderRow {
-        grid-template-columns: 56px minmax(0, 1fr);
-      }
+  .articleHeaderRow {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
 
-      .articleBoardTag {
-        display: none;
-      }
+  .articleBoardTag {
+    display: none;
+  }
 
-      .replyRow {
-        grid-template-columns: 24px 110px minmax(0, 1fr);
-      }
+  .replyRow {
+    grid-template-columns: 24px 110px minmax(0, 1fr);
+    font-size: 13px;
+  }
 
-      .replyMeta {
-        display: none;
-      }
-    }
-  
+  .replyMeta {
+    display: none;
+  }
+}
+
+/* Mobile & Narrow Screens (max-width: 680px) */
+@media (max-width: 680px) {
+  /* Board list on mobile: hide Category and Owner to give room to Name, Desc, Hot */
+  .boardHead > :nth-child(4),
+  .boardRow > :nth-child(4),
+  .boardHead > :nth-child(7),
+  .boardRow > :nth-child(7) {
+    display: none;
+  }
+
+  .boardHead,
+  .boardRow {
+    grid-template-columns: 16px 44px 120px minmax(80px, 1fr) 46px;
+    column-gap: 6px;
+    font-size: 12.5px;
+    padding: 2px 6px;
+  }
+
+  /* Thread list on mobile: hide Date and Today Replies to make room for Title */
+  .threadHead > :nth-child(3),
+  .threadRow > :nth-child(3),
+  .threadHead > :nth-child(6),
+  .threadRow > :nth-child(6) {
+    display: none;
+  }
+
+  .threadHead,
+  .threadRow {
+    grid-template-columns: 16px 44px 90px minmax(80px, 1fr) 44px;
+    column-gap: 6px;
+    font-size: 12.5px;
+    padding: 2px 6px;
+  }
+
+  .topBar {
+    min-height: 28px;
+    padding: 3px 8px;
+    font-size: 12px;
+  }
+
+  .subBar {
+    min-height: 26px;
+    padding: 2px 8px;
+    gap: 12px;
+    font-size: 12px;
+  }
+
+  .notice {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+
+  .tableHead {
+    min-height: 24px;
+    padding: 2px 6px;
+    font-size: 12px;
+  }
+
+  .articleView {
+    padding: 8px 10px 24px;
+    font-size: 13px;
+  }
+
+  .articleHeaderRow {
+    grid-template-columns: 48px minmax(0, 1fr);
+    font-size: 12px;
+  }
+
+  .replyRow {
+    grid-template-columns: 18px 80px minmax(0, 1fr);
+    font-size: 12px;
+  }
+}

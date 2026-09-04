@@ -28,7 +28,10 @@ print_usage() {
   -h, --help  顯示本說明
 
 可用環境變數：
-  SMALLTALK_VERSION        指定發行版本，例如 1.26.0903 build 1805
+  SMALLTALK_VERSION           指定發行版本，例如 1.26.0904 build 1001
+  SMALLTALK_CODESIGN_IDENTITY 指定 Developer ID Application 簽章身分
+  SMALLTALK_NOTARY_PROFILE    指定 notarytool Keychain Profile（預設 VaderApp）
+  SMALLTALK_SKIP_NOTARIZE     設為 1 可跳過公證（僅供本機測試，產出的 DMG 不能發佈）
 USAGE
 }
 
@@ -98,6 +101,7 @@ latest_release_directory() {
 }
 
 checksum_file() {
+	# zsh 的 path 是與 PATH 綁定的特殊陣列，不可拿來當一般區域變數。
 	local file_path="$1"
 	if command -v shasum >/dev/null 2>&1; then
 		shasum -a 256 "$file_path" | /usr/bin/awk '{print $1}'
@@ -151,6 +155,114 @@ write_package_manifest() {
 	print "已更新：$manifest"
 }
 
+# 公證是 Gatekeeper 放行的必要條件。只有 Developer ID 簽章而未公證時，
+# 別台 Mac 開啟會被擋下（spctl 判為 "Unnotarized Developer ID"）。
+# 設定 SMALLTALK_SKIP_NOTARIZE=1 可跳過（僅供本機測試，產出的 DMG 不能發佈）。
+NOTARY_PROFILE="${SMALLTALK_NOTARY_PROFILE:-VaderApp}"
+SKIP_NOTARIZE="${SMALLTALK_SKIP_NOTARIZE:-0}"
+CODESIGN_IDENTITY="${SMALLTALK_CODESIGN_IDENTITY:-}"
+
+resolve_codesign_identity() {
+	local identities
+	identities="$(/usr/bin/security find-identity -v -p codesigning 2>/dev/null || true)"
+	if [[ -z "$CODESIGN_IDENTITY" ]]; then
+		CODESIGN_IDENTITY="$(printf '%s\n' "$identities" |
+			/usr/bin/sed -En 's/^[[:space:]]*[0-9]+\) [0-9A-F]+ "(Developer ID Application:.*)"$/\1/p' |
+			/usr/bin/head -1)"
+	fi
+	if [[ -z "$CODESIGN_IDENTITY" ]]; then
+		if [[ "$SKIP_NOTARIZE" == "1" ]]; then
+			CODESIGN_IDENTITY="-"
+			print "警告：找不到 Developer ID 簽章身分，將使用 ad-hoc 簽章（僅供本機測試）。"
+		else
+			print -u2 "錯誤：找不到 Developer ID Application 簽章身分。"
+			print -u2 "可用 SMALLTALK_CODESIGN_IDENTITY 指定，或設 SMALLTALK_SKIP_NOTARIZE=1 產生僅供本機測試的版本。"
+			exit 1
+		fi
+	fi
+	export SMALLTALK_CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
+	if [[ "$SKIP_NOTARIZE" == "1" ]]; then
+		print "警告：已跳過公證，產出的 DMG 不可發佈。"
+		return 0
+	fi
+	/usr/bin/xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 || {
+		print -u2 "錯誤：notarytool Keychain Profile 無效：$NOTARY_PROFILE"
+		print -u2 "建立方式：xcrun notarytool store-credentials $NOTARY_PROFILE --apple-id <id> --team-id <team> --password <app-specific-password>"
+		exit 1
+	}
+}
+
+# staple_notarized_target 會重試：公證票根在提交完成後可能還要幾秒才查得到。
+staple_notarized_target() {
+	local target="$1"
+	local attempt=1
+	while (( attempt <= 10 )); do
+		if /usr/bin/xcrun stapler staple "$target"; then
+			/usr/bin/xcrun stapler validate "$target"
+			return 0
+		fi
+		(( attempt++ ))
+		/bin/sleep 6
+	done
+	print -u2 "錯誤：公證完成，但無法 staple：$target"
+	return 1
+}
+
+sign_mac_app() {
+	local app_path="$1"
+	if [[ -n "$CODESIGN_IDENTITY" && "$CODESIGN_IDENTITY" != "-" ]]; then
+		print "套用 Developer ID 簽章與 Hardened Runtime：${app_path:t}"
+		if [[ -f "$app_path/Contents/MacOS/SmallTalkServer" ]]; then
+			/usr/bin/codesign --force --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "$app_path/Contents/MacOS/SmallTalkServer"
+		fi
+		/usr/bin/codesign --force --deep --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "$app_path"
+		/usr/bin/codesign --verify --deep --strict --verbose=2 "$app_path"
+	fi
+}
+
+notarize_app() {
+	local app_path="$1"
+	[[ "$SKIP_NOTARIZE" == "1" ]] && return 0
+	local app_zip="$PACK_STAGE/${app_path:t:r}-notarize.zip"
+	print "送出公證：${app_path:t}"
+	/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$app_path" "$app_zip"
+	/usr/bin/xcrun notarytool submit "$app_zip" --keychain-profile "$NOTARY_PROFILE" --wait
+	staple_notarized_target "$app_path"
+	/usr/sbin/spctl --assess --type execute --verbose=4 "$app_path"
+}
+
+notarize_dmg() {
+	local dmg_path="$1"
+	if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
+		/usr/bin/codesign --force --sign "$CODESIGN_IDENTITY" --timestamp "$dmg_path"
+		/usr/bin/codesign --verify --strict --verbose=2 "$dmg_path"
+	fi
+	[[ "$SKIP_NOTARIZE" == "1" ]] && return 0
+	print "送出公證：${dmg_path:t}"
+	/usr/bin/xcrun notarytool submit "$dmg_path" --keychain-profile "$NOTARY_PROFILE" --wait
+	staple_notarized_target "$dmg_path"
+	/usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg_path"
+}
+
+# assert_hardened_runtime 擋住「簽了但沒開 hardened runtime」的版本：
+# 那種版本送公證一定被拒，而且 Gatekeeper 也不會放行。
+assert_hardened_runtime() {
+	local app_path="$1"
+	if [[ "$SKIP_NOTARIZE" == "1" && "$CODESIGN_IDENTITY" == "-" ]]; then
+		return 0
+	fi
+	/usr/bin/codesign -dv --verbose=4 "$app_path" 2>&1 |
+		/usr/bin/grep -F 'Authority=Developer ID Application:' >/dev/null || {
+		print -u2 "錯誤：App 未使用 Developer ID Application 簽署：$app_path"
+		return 1
+	}
+	/usr/bin/codesign -dv --verbose=4 "$app_path" 2>&1 |
+		/usr/bin/grep -E 'flags=0x[0-9a-f]*\(.*runtime.*\)' >/dev/null || {
+		print -u2 "錯誤：App 未啟用 hardened runtime，無法公證：$app_path"
+		return 1
+	}
+}
+
 build_dmg() {
 	local platform_directory="$1"
 	local release_name="$2"
@@ -171,6 +283,12 @@ build_dmg() {
 	/usr/bin/ditto "$app_source" "$image_root/SmallTalk.app"
 	/bin/ln -s /Applications "$image_root/Applications"
 
+	# 先確認 App 本身可公證，再送公證，最後才封進 DMG——
+	# 票根要 staple 在 App 上，順序反了 DMG 內的 App 仍是未公證狀態。
+	sign_mac_app "$image_root/SmallTalk.app" || return 1
+	assert_hardened_runtime "$image_root/SmallTalk.app" || return 1
+	notarize_app "$image_root/SmallTalk.app" || return 1
+
 	print "建立 DMG：$output_path"
 	/usr/bin/hdiutil create \
 		-volname "SmallTalk" \
@@ -178,6 +296,7 @@ build_dmg() {
 		-ov \
 		-format UDZO \
 		"$temporary_output"
+	notarize_dmg "$temporary_output" || return 1
 	/bin/mv -f -- "$temporary_output" "$output_path"
 }
 
@@ -186,6 +305,11 @@ require_command go
 require_command mktemp
 require_command hdiutil
 require_command ditto
+require_command codesign
+require_command security
+require_command xcrun
+require_command spctl
+resolve_codesign_identity
 if ! command -v shasum >/dev/null 2>&1 && ! command -v sha256sum >/dev/null 2>&1; then
 	print -u2 "錯誤：找不到 shasum 或 sha256sum。"
 	exit 1
@@ -227,6 +351,11 @@ fi
 
 for platform_directory in "${mac_directories[@]}"; do
 	build_dmg "$platform_directory" "$RELEASE_NAME"
+	write_manifest "$platform_directory"
+done
+
+for platform_directory in "$RELEASE_DIRECTORY"/linux-*(/N) "$RELEASE_DIRECTORY"/windows-*(/N); do
+	[[ -d "$platform_directory" ]] || continue
 	write_manifest "$platform_directory"
 done
 

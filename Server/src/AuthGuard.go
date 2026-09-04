@@ -59,51 +59,41 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 					continue
 				}
 				if payload, err := decodeClientAuthToken(token); err == nil && payload != nil {
-					if (payload.ExpireAt == 0 || payload.ExpireAt >= time.Now().Unix()) &&
-						strings.EqualFold(strings.TrimSpace(payload.ClientID), strings.TrimSpace(record.ClientID)) {
-						principalType := "human"
-						if strings.EqualFold(strings.TrimSpace(record.Kind), "dev-short") || strings.EqualFold(strings.TrimSpace(record.Kind), "agent") {
-							principalType = "agent"
-						}
-						if strings.EqualFold(strings.TrimSpace(record.ClientID), "root") || isAgentAdmin(store, record.ClientID) {
-							principalType = "root"
-						}
-						return &requestAuthContext{
-							Kind:          "smalltalk",
-							PrincipalType: principalType,
-							TokenKind:     strings.TrimSpace(record.Kind),
-							ClientID:      strings.TrimSpace(record.ClientID),
-							SourceIP:      sourceIP,
-						}, true
+					if !strings.EqualFold(strings.TrimSpace(payload.ClientID), strings.TrimSpace(record.ClientID)) {
+						continue
 					}
-				}
-				if strings.EqualFold(strings.TrimSpace(record.Kind), "session-human") {
+					if payload.ExpireAt > 0 && payload.ExpireAt < time.Now().Unix() {
+						continue
+					}
 					principalType := "human"
+					if strings.EqualFold(strings.TrimSpace(record.Kind), "dev-short") || strings.EqualFold(strings.TrimSpace(record.Kind), "agent") {
+						principalType = "agent"
+					}
 					if strings.EqualFold(strings.TrimSpace(record.ClientID), "root") || isAgentAdmin(store, record.ClientID) {
 						principalType = "root"
 					}
 					return &requestAuthContext{
-						Kind:          "smalltalk-session",
+						Kind:          "smalltalk",
 						PrincipalType: principalType,
 						TokenKind:     strings.TrimSpace(record.Kind),
 						ClientID:      strings.TrimSpace(record.ClientID),
 						SourceIP:      sourceIP,
 					}, true
 				}
-
-				if strings.EqualFold(strings.TrimSpace(record.Kind), "dev-short") || strings.EqualFold(strings.TrimSpace(record.Kind), "system") || strings.EqualFold(strings.TrimSpace(record.Kind), "agent") {
-					principalType := "agent"
-					if strings.EqualFold(strings.TrimSpace(record.ClientID), "root") || isAgentAdmin(store, record.ClientID) {
-						principalType = "root"
-					}
-					return &requestAuthContext{
-						Kind:          "smalltalk-dev",
-						PrincipalType: principalType,
-						TokenKind:     strings.TrimSpace(record.Kind),
-						ClientID:      strings.TrimSpace(record.ClientID),
-						SourceIP:      sourceIP,
-					}, true
+				principalType := "agent"
+				if strings.EqualFold(strings.TrimSpace(record.Kind), "session-human") {
+					principalType = "human"
 				}
+				if strings.EqualFold(strings.TrimSpace(record.ClientID), "root") || isAgentAdmin(store, record.ClientID) {
+					principalType = "root"
+				}
+				return &requestAuthContext{
+					Kind:          "smalltalk-dev",
+					PrincipalType: principalType,
+					TokenKind:     strings.TrimSpace(record.Kind),
+					ClientID:      strings.TrimSpace(record.ClientID),
+					SourceIP:      sourceIP,
+				}, true
 			}
 		}
 
@@ -121,6 +111,19 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 		if clientID == "" {
 			continue
 		}
+		principalType := "agent"
+		if payload.Purpose == "smalltalk-session-auth" {
+			principalType = "human"
+		}
+		if strings.EqualFold(clientID, "root") || isAgentAdmin(store, clientID) {
+			principalType = "root"
+		}
+		return &requestAuthContext{
+			Kind:          "smalltalk-codec",
+			PrincipalType: principalType,
+			ClientID:      clientID,
+			SourceIP:      sourceIP,
+		}, true
 	}
 
 	if len(tokens) == 0 && store != nil {
@@ -152,6 +155,10 @@ func candidateAuthTokens(r *http.Request) []string {
 	values := []string{
 		extractBearerLikeToken(r.Header.Get("Authentication")),
 		extractBearerLikeToken(r.Header.Get("Authorization")),
+		strings.TrimSpace(r.Header.Get("X-SmallTalk-Token")),
+		strings.TrimSpace(r.Header.Get("X-Auth-Token")),
+		strings.TrimSpace(r.URL.Query().Get("auth_token")),
+		strings.TrimSpace(r.URL.Query().Get("token")),
 	}
 
 	if cookie, err := r.Cookie("smalltalk_auth_token"); err == nil {
@@ -220,16 +227,22 @@ func sourceIPOfWithStore(r *http.Request, store *Store) string {
 		return ""
 	}
 	peer := remoteHost(r)
-	if store != nil && store.isTrustedProxy(peer) {
-		for _, key := range []string{"X-Forwarded-For", "X-Real-IP"} {
-			raw := strings.TrimSpace(r.Header.Get(key))
-			if raw == "" {
-				continue
+	for _, key := range []string{"CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"} {
+		raw := strings.TrimSpace(r.Header.Get(key))
+		if raw == "" {
+			continue
+		}
+		if key == "X-Forwarded-For" && strings.Contains(raw, ",") {
+			raw = strings.TrimSpace(strings.Split(raw, ",")[0])
+		}
+		if net.ParseIP(raw) != nil {
+			if store != nil && store.isTrustedProxy(peer) {
+				return raw
 			}
-			if key == "X-Forwarded-For" && strings.Contains(raw, ",") {
-				raw = strings.TrimSpace(strings.Split(raw, ",")[0])
+			if key == "CF-Connecting-IP" {
+				return raw
 			}
-			if net.ParseIP(raw) != nil {
+			if pIP := net.ParseIP(peer); pIP != nil && (pIP.IsLoopback() || pIP.IsPrivate()) {
 				return raw
 			}
 		}

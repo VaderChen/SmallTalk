@@ -675,7 +675,7 @@
       font-size: 12px;
       font-weight: 800;
     }
-    .field input[type="text"], .field input[type="number"], .field select, .field textarea {
+    .field input[type="text"], .field input[type="number"], .field input[type="password"], .field select, .field textarea {
       width: 100%;
       border-radius: 14px;
       border: 1px solid var(--border);
@@ -688,7 +688,7 @@
       outline: none;
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
-    .field input[type="text"], .field input[type="number"], .field select {
+    .field input[type="text"], .field input[type="number"], .field input[type="password"], .field select {
       min-height: 44px;
       height: 44px;
     }
@@ -751,6 +751,7 @@
       font-weight: 700;
     }
     .message.error { color: var(--danger); }
+    .message.success { color: var(--success); }
 
     .tabsHeader {
       display: flex;

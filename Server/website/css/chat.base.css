@@ -28,6 +28,7 @@
       display: grid;
       grid-template-rows: auto auto auto 1fr auto;
       height: 100vh;
+      height: 100dvh;
       width: 100vw;
     }
 
@@ -54,7 +55,13 @@
       align-items: center;
       gap: 20px;
       white-space: nowrap;
-      overflow: hidden;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+
+    .subBar::-webkit-scrollbar {
+      display: none;
     }
 
     .hotkey {
@@ -78,7 +85,9 @@
       overflow-y: auto;
       overflow-x: hidden;
       contain: layout paint style;
+      touch-action: pan-y;
       -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
     }
 
     .view.active {
@@ -101,6 +110,8 @@
       position: relative;
       content-visibility: auto;
       contain-intrinsic-size: 0 28px;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     .boardPinnedDivider {
@@ -136,32 +147,55 @@
 
     .boardHead,
     .boardRow {
-      grid-template-columns: 22px 64px 210px 72px minmax(160px, 1fr) 68px 104px;
+      grid-template-columns: 22px 60px 190px 68px minmax(140px, 1fr) 64px 120px;
+      column-gap: 8px;
     }
 
     .boardHead > :nth-child(4),
     .boardRow > :nth-child(4) {
-      padding-left: 14px;
+      padding: 0 2px;
     }
 
     .boardHead > :nth-child(5),
     .boardRow > :nth-child(5) {
-      padding-left: 14px;
+      padding: 0 4px;
+    }
+
+    .boardHead > :nth-child(6),
+    .boardRow > :nth-child(6) {
+      text-align: center;
+      padding: 0 2px;
+    }
+
+    .boardHead > :nth-child(7),
+    .boardRow > :nth-child(7) {
+      padding-left: 4px;
     }
 
     .threadHead,
     .threadRow {
-      grid-template-columns: 22px 64px 116px 176px minmax(0, 1fr) 72px 64px;
+      grid-template-columns: 22px 60px 100px 140px minmax(140px, 1fr) 60px 56px;
+      column-gap: 8px;
     }
 
     .threadHead > :nth-child(4),
     .threadRow > :nth-child(4) {
-      padding-left: 14px;
+      padding: 0 2px;
     }
 
     .threadHead > :nth-child(5),
     .threadRow > :nth-child(5) {
-      padding-left: 16px;
+      padding: 0 4px;
+    }
+
+    .threadHead > :nth-child(6),
+    .threadRow > :nth-child(6) {
+      text-align: center;
+    }
+
+    .threadHead > :nth-child(7),
+    .threadRow > :nth-child(7) {
+      text-align: center;
     }
 
     .boardName,
@@ -206,7 +240,9 @@
       min-width: 0;
       color: #7dcbf5;
       overflow: hidden;
-      text-overflow: clip;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding-right: 6px;
     }
 
     .pinnedRow .boardDesc {
@@ -229,6 +265,10 @@
     .threadFloor {
       color: var(--yellow);
       font-weight: 700;
+    }
+
+    .boardHot {
+      text-align: center;
     }
 
     .threadTitle {
@@ -275,7 +315,8 @@
     .boardOwner {
       color: var(--text);
       overflow: hidden;
-      text-overflow: clip;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .boardCursorCol {

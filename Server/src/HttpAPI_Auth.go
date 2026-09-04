@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -87,6 +88,14 @@ func (h *HttpAPI_auth) handleLogin(w http.ResponseWriter, r *http.Request, body 
 		return mustJSON(ErrorResponse{Error: "post required"})
 	}
 
+	sourceIP := sourceIPOf(r)
+	if h.Store != nil && h.Store.AuthRateLimiter != nil && sourceIP != "" {
+		if blocked, wait := h.Store.AuthRateLimiter.IsBlocked(sourceIP); blocked {
+			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(wait.Seconds())+1))
+			return mustJSON(ErrorResponse{Error: fmt.Sprintf("too many failed login attempts, retry in %d seconds", int(wait.Seconds())+1)})
+		}
+	}
+
 	var req AuthLoginRequest
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		return mustJSON(ErrorResponse{Error: "invalid json"})
@@ -107,16 +116,31 @@ func (h *HttpAPI_auth) handleLogin(w http.ResponseWriter, r *http.Request, body 
 	}
 	if strings.TrimSpace(h.MarsCloudURL) == "" {
 		// 沒有 MARS Cloud 時，使用本機設定的預設帳密登入。
-		// 離線登入只建立 SmallTalk 本機 session，不會核發 MARS Cloud token。
-		if req.Account != strings.TrimSpace(h.DefaultAccount) || req.Password != h.DefaultPassword {
+		expectedPassword := strings.TrimSpace(h.DefaultPassword)
+		if h.Store != nil {
+			if p := h.Store.GetAdminPassword(); p != "" {
+				expectedPassword = p
+			}
+		}
+		if req.Account != strings.TrimSpace(h.DefaultAccount) || req.Password != expectedPassword {
+			if h.Store != nil && h.Store.AuthRateLimiter != nil && sourceIP != "" {
+				h.Store.AuthRateLimiter.RecordFailure(sourceIP)
+			}
 			return mustJSON(ErrorResponse{Error: "login failed"})
 		}
 	} else {
 		client := MarsClient.Create()
 		ok := client.LoginWithProj(h.MarsCloudURL, req.Account, req.Password, proj)
 		if !ok {
+			if h.Store != nil && h.Store.AuthRateLimiter != nil && sourceIP != "" {
+				h.Store.AuthRateLimiter.RecordFailure(sourceIP)
+			}
 			return mustJSON(ErrorResponse{Error: "login failed"})
 		}
+	}
+
+	if h.Store != nil && h.Store.AuthRateLimiter != nil && sourceIP != "" {
+		h.Store.AuthRateLimiter.RecordSuccess(sourceIP)
 	}
 
 	sessionToken, _, _, err := encodeSessionAuthToken(req.Account, loginSessionTTLSec)
@@ -128,7 +152,7 @@ func (h *HttpAPI_auth) handleLogin(w http.ResponseWriter, r *http.Request, body 
 			Token:     sessionToken,
 			ClientID:  req.Account,
 			Kind:      "session-human",
-			SourceIP:  sourceIPOf(r),
+			SourceIP:  sourceIP,
 			IssuedAt:  time.Now().Format(time.RFC3339Nano),
 			ExpiresAt: time.Now().Add(24 * time.Hour).Format(time.RFC3339Nano),
 		}, true)
@@ -199,6 +223,31 @@ func (h *HttpAPI_auth) handleDevRegister(r *http.Request, body string, isPOST bo
 		req.DisplayName = defaultDeviceDisplayName(req.MACAddress)
 	}
 
+	// Protect against short-term registration flooding from same source (IP or MAC)
+	sourceIP := sourceIPOf(r)
+	if h.Store != nil && h.Store.RegRateLimiter != nil {
+		if sourceIP != "" {
+			if allowed, wait := h.Store.RegRateLimiter.CheckAndRecord("ip:" + sourceIP); !allowed {
+				return mustJSON(DevRegisterResponse{
+					OK:      false,
+					Status:  devLoginStatusBlocked,
+					Reason:  "rate_limited",
+					Message: fmt.Sprintf("短時間內來自同來源的帳號申請次數過多，請於 %d 秒後再試。", int(wait.Seconds())+1),
+				})
+			}
+		}
+		if req.MACAddress != "" {
+			if allowed, wait := h.Store.RegRateLimiter.CheckAndRecord("mac:" + req.MACAddress); !allowed {
+				return mustJSON(DevRegisterResponse{
+					OK:      false,
+					Status:  devLoginStatusBlocked,
+					Reason:  "rate_limited",
+					Message: fmt.Sprintf("短時間內此裝置的帳號申請次數過多，請於 %d 秒後再試。", int(wait.Seconds())+1),
+				})
+			}
+		}
+	}
+
 	entry, err := h.Store.UpsertAgentRegistry(AgentRegistryUpsert{
 		ClientID:    req.ClientID,
 		DisplayName: req.DisplayName,
@@ -206,7 +255,7 @@ func (h *HttpAPI_auth) handleDevRegister(r *http.Request, body string, isPOST bo
 		LastSeenAt:  time.Now(),
 		Meta: map[string]any{
 			"source":    "dev-register",
-			"source_ip": sourceIPOf(r),
+			"source_ip": sourceIP,
 		},
 	})
 	if err != nil {
@@ -244,6 +293,18 @@ func (h *HttpAPI_auth) handleDevLogin(r *http.Request, body string, isPOST bool)
 		})
 	}
 
+	sourceIP := sourceIPOf(r)
+	if h.Store.AuthRateLimiter != nil && sourceIP != "" {
+		if blocked, wait := h.Store.AuthRateLimiter.IsBlocked(sourceIP); blocked {
+			return mustJSON(DevLoginResponse{
+				OK:      false,
+				Status:  devLoginStatusBlocked,
+				Reason:  "rate_limited",
+				Message: fmt.Sprintf("短時間內登入失敗次數過多，已被暫時鎖定，請於 %d 秒後再試。", int(wait.Seconds())+1),
+			})
+		}
+	}
+
 	var req DevLoginRequest
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		return mustJSON(DevLoginResponse{
@@ -268,6 +329,9 @@ func (h *HttpAPI_auth) handleDevLogin(r *http.Request, body string, isPOST bool)
 
 	entry, ok := h.Store.GetAgentRegistry(req.ClientID)
 	if !ok {
+		if h.Store.AuthRateLimiter != nil && sourceIP != "" {
+			h.Store.AuthRateLimiter.RecordFailure(sourceIP)
+		}
 		return mustJSON(DevLoginResponse{
 			OK:         false,
 			Status:     devLoginStatusUnregistered,
@@ -292,6 +356,9 @@ func (h *HttpAPI_auth) handleDevLogin(r *http.Request, body string, isPOST bool)
 		})
 	}
 	if normalizeMACAddress(entry.MACAddress) != req.MACAddress {
+		if h.Store.AuthRateLimiter != nil && sourceIP != "" {
+			h.Store.AuthRateLimiter.RecordFailure(sourceIP)
+		}
 		return mustJSON(DevLoginResponse{
 			OK:          false,
 			Status:      devLoginStatusError,
@@ -352,7 +419,6 @@ func (h *HttpAPI_auth) handleDevLogin(r *http.Request, body string, isPOST bool)
 		}
 	}
 
-	sourceIP := sourceIPOf(r)
 	tokenRecord := AuthTokenRecord{
 		Token:      strings.TrimSpace(entry.Token),
 		ClientID:   entry.ClientID,
@@ -378,6 +444,9 @@ func (h *HttpAPI_auth) handleDevLogin(r *http.Request, body string, isPOST bool)
 			"dev_login_ip": sourceIP,
 		},
 	})
+	if h.Store != nil && h.Store.AuthRateLimiter != nil && sourceIP != "" {
+		h.Store.AuthRateLimiter.RecordSuccess(sourceIP)
+	}
 	return mustJSON(DevLoginResponse{
 		OK:          true,
 		Status:      devLoginStatusSuccess,

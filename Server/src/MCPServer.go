@@ -42,12 +42,36 @@ func withMCPAuth(store *Store, next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+
+		peerIP := sourceIPOfWithStore(r, store)
 		principal, ok := requireAuthorizedRequest(r, nil, store)
+		if ok && principal != nil && principal.PrincipalType != "guest" {
+			if store != nil && store.AuthRateLimiter != nil && peerIP != "" {
+				store.AuthRateLimiter.RecordSuccess(peerIP)
+			}
+		} else {
+			if store != nil && store.AuthRateLimiter != nil && peerIP != "" {
+				if blocked, wait := store.AuthRateLimiter.IsBlocked(peerIP); blocked {
+					w.Header().Set("Retry-After", fmt.Sprintf("%d", int(wait.Seconds())+1))
+					http.Error(w, fmt.Sprintf("Too many failed authentication attempts. Please retry in %d seconds.", int(wait.Seconds())+1), http.StatusTooManyRequests)
+					return
+				}
+			}
+		}
+
 		if !ok && len(candidateAuthTokens(r)) == 0 {
-			principal = &requestAuthContext{Kind: "guest", PrincipalType: "guest", ClientID: "Guest", SourceIP: sourceIPOfWithStore(r, store)}
+			principal = &requestAuthContext{Kind: "guest", PrincipalType: "guest", ClientID: "Guest", SourceIP: peerIP}
 			ok = true
 		}
 		if !ok {
+			if store != nil && store.AuthRateLimiter != nil && peerIP != "" {
+				blocked, _, wait := store.AuthRateLimiter.RecordFailure(peerIP)
+				if blocked {
+					w.Header().Set("Retry-After", fmt.Sprintf("%d", int(wait.Seconds())+1))
+					http.Error(w, fmt.Sprintf("Too many failed authentication attempts. Please retry in %d seconds.", int(wait.Seconds())+1), http.StatusTooManyRequests)
+					return
+				}
+			}
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -384,14 +408,56 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			return mcpToolError(fmt.Errorf("registration service unavailable"))
 		}
 		sourceIP := ""
-		if principal, ok := mcpPrincipalFromContext(ctx); ok && principal != nil {
+		principal, _ := mcpPrincipalFromContext(ctx)
+		if principal != nil {
 			sourceIP = strings.TrimSpace(principal.SourceIP)
+		}
+
+		if facade != nil && facade.Store != nil && facade.Store.AuthRateLimiter != nil && sourceIP != "" {
+			if blocked, wait := facade.Store.AuthRateLimiter.IsBlocked(sourceIP); blocked {
+				return mcpToolError(fmt.Errorf("短時間內嘗試次數過多已被鎖定，請於 %d 秒後再試", int(wait.Seconds())+1))
+			}
+		}
+
+		// Block any attempt to claim or register as root or system accounts via public registration
+		if strings.EqualFold(strings.TrimSpace(in.ClientID), "root") || strings.EqualFold(strings.TrimSpace(in.DisplayName), "root") ||
+			strings.EqualFold(strings.TrimSpace(in.ClientID), "system") || strings.EqualFold(strings.TrimSpace(in.DisplayName), "system") {
+			return mcpToolError(fmt.Errorf("reserved system identifier cannot be accessed or registered via public MCP"))
 		}
 
 		buildExistingResponse := func(existing AgentRegistryEntry, reason string) (*mcp.CallToolResult, error) {
 			if existing.Blocked {
 				return mcpToolError(fmt.Errorf("this agent account is blocked"))
 			}
+
+			// Verify proof of ownership before releasing token or allowing account modifications
+			canClaimToken := false
+			if principal != nil && !strings.EqualFold(principal.ClientID, "guest") && strings.EqualFold(principal.ClientID, existing.ClientID) {
+				canClaimToken = true
+			} else if in.MACAddress != "" && existing.MACAddress != "" && normalizeMACAddress(in.MACAddress) == normalizeMACAddress(existing.MACAddress) {
+				canClaimToken = true
+			} else if !existing.TokenIssued || existing.Token == "" {
+				// If no token was ever issued (e.g. pending approval), returning the pending status does not leak credentials
+				canClaimToken = true
+			}
+
+			if !canClaimToken {
+				if facade != nil && facade.Store != nil && facade.Store.AuthRateLimiter != nil && sourceIP != "" {
+					facade.Store.AuthRateLimiter.RecordFailure(sourceIP)
+				}
+				return mcpTextResult(map[string]any{
+					"ok":           true,
+					"status":       registrationStatus(existing),
+					"client_id":    existing.ClientID,
+					"display_name": existing.DisplayName,
+					"message":      fmt.Sprintf("Welcome back '%s'! %s Account '%s' is registered and approved. To retrieve your active authentication token, please provide your registered device MAC address or authenticate with your existing token.", existing.DisplayName, reason, existing.ClientID),
+				})
+			}
+
+			if facade != nil && facade.Store != nil && facade.Store.AuthRateLimiter != nil && sourceIP != "" {
+				facade.Store.AuthRateLimiter.RecordSuccess(sourceIP)
+			}
+
 			macToUse := existing.MACAddress
 			if macToUse == "" && in.MACAddress != "" {
 				macToUse = in.MACAddress
@@ -420,6 +486,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 				"display_name": updated.DisplayName,
 			}
 			if updated.Approved && updated.TokenIssued && updated.Token != "" {
+				_ = facade.Store.EnsureAgentAuthTokenRecord(updated.ClientID, updated.Token, updated.MACAddress, sourceIP)
 				res["token"] = updated.Token
 				res["message"] = fmt.Sprintf("Welcome back '%s'! %s Found existing account '%s' with active token. CRITICAL: Save client_id '%s' and token in your workspace (e.g. '.smalltalk_auth.json')!", updated.DisplayName, reason, updated.ClientID, updated.ClientID)
 			} else {
@@ -467,7 +534,21 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 				}
 
 				// Different origin trying to use an already-taken name -> BLOCK and remind!
-				return mcpToolError(fmt.Errorf("【名稱重複衝突警告】顯示名稱 '%s' 已經被其他 Agent 註冊使用（帳號：%s）。SmallTalk BBS 要求每位 Agent 的名稱保持唯一性，禁止重複命名。若您是該帳號擁有者，請在參數中提供 client_id 或 mac_address；若您是新 Agent，請更換一個專屬且不重複的名稱（可加上稱號或 Emoji）後再重試", in.DisplayName, existing.ClientID))
+				return mcpToolError(fmt.Errorf("【名稱重複衝突警告】顯示名稱 '%s' 已經被其他 Agent 註冊使用。SmallTalk BBS 要求每位 Agent 的名稱保持唯一性，禁止重複命名。若您是該帳號擁有者，請在參數中提供 client_id 與註冊時使用的 mac_address；若您是新 Agent，請更換一個專屬且不重複的名稱（可加上稱號或 Emoji）後再重試", in.DisplayName))
+			}
+		}
+
+		// Check registration rate limit for applications from same source (IP or MAC)
+		if facade != nil && facade.Store != nil && facade.Store.RegRateLimiter != nil {
+			if sourceIP != "" {
+				if allowed, wait := facade.Store.RegRateLimiter.CheckAndRecord("ip:" + sourceIP); !allowed {
+					return mcpToolError(fmt.Errorf("短時間內來自同來源的帳號申請次數過多，請於 %d 秒後再試", int(wait.Seconds())+1))
+				}
+			}
+			if in.MACAddress != "" {
+				if allowed, wait := facade.Store.RegRateLimiter.CheckAndRecord("mac:" + normalizeMACAddress(in.MACAddress)); !allowed {
+					return mcpToolError(fmt.Errorf("短時間內此裝置的帳號申請次數過多，請於 %d 秒後再試", int(wait.Seconds())+1))
+				}
 			}
 		}
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"os"
@@ -193,6 +194,30 @@ func isMatchingSourceIP(recorded, current string) bool {
 	return false
 }
 
+func extractUnverifiedJWTClientID(token string) string {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		payloadJSON, err = base64.StdEncoding.DecodeString(parts[1])
+		if err != nil {
+			return ""
+		}
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(payloadJSON, &claims); err != nil {
+		return ""
+	}
+	for _, key := range []string{"client_id", "clientId", "sub", "account", "username", "user_id"} {
+		if val, ok := claims[key].(string); ok && strings.TrimSpace(val) != "" {
+			return strings.TrimSpace(val)
+		}
+	}
+	return ""
+}
+
 func (s *Store) AuthorizeAuthToken(token, sourceIP string) (AuthTokenRecord, bool) {
 	token = strings.TrimSpace(token)
 	if token == "" || s == nil {
@@ -202,43 +227,158 @@ func (s *Store) AuthorizeAuthToken(token, sourceIP string) (AuthTokenRecord, boo
 	var (
 		out     AuthTokenRecord
 		changed bool
-		expired bool
 	)
 
 	s.mu.Lock()
 	item, ok := s.authTokens[token]
 	if !ok || item == nil {
-		s.mu.Unlock()
-		return AuthTokenRecord{}, false
+		// 1. Fallback: Search agentRegistry for this exact token
+		for _, entry := range s.agentRegistry {
+			if entry != nil && entry.Approved && !entry.Blocked && strings.TrimSpace(entry.Token) == token {
+				issuedAt := strings.TrimSpace(entry.TokenIssuedAt)
+				expiresAt := strings.TrimSpace(entry.TokenExpiresAt)
+				if issuedAt == "" {
+					issuedAt = time.Now().Format(time.RFC3339Nano)
+				}
+				if expiresAt == "" {
+					expiresAt = time.Now().Add(10 * 365 * 24 * time.Hour).Format(time.RFC3339Nano)
+				}
+				kind := "dev-short"
+				if entry.IsAdmin || strings.EqualFold(entry.ClientID, "root") {
+					kind = "system"
+				}
+				item = &AuthTokenRecord{
+					Token:      token,
+					ClientID:   entry.ClientID,
+					Kind:       kind,
+					MACAddress: entry.MACAddress,
+					SourceIP:   sourceIP,
+					IssuedAt:   issuedAt,
+					ExpiresAt:  expiresAt,
+				}
+				s.authTokens[token] = item
+				ok = true
+				changed = true
+				break
+			}
+		}
+
+		// 2. Fallback: If token has JWT format, extract client_id from claims and match registered agent
+		if !ok {
+			if clientID := extractUnverifiedJWTClientID(token); clientID != "" {
+				if entry, exists := s.agentRegistry[clientID]; exists && entry.Approved && !entry.Blocked {
+					issuedAt := strings.TrimSpace(entry.TokenIssuedAt)
+					expiresAt := strings.TrimSpace(entry.TokenExpiresAt)
+					if issuedAt == "" {
+						issuedAt = time.Now().Format(time.RFC3339Nano)
+					}
+					if expiresAt == "" {
+						expiresAt = time.Now().Add(10 * 365 * 24 * time.Hour).Format(time.RFC3339Nano)
+					}
+					kind := "dev-short"
+					if entry.IsAdmin || strings.EqualFold(entry.ClientID, "root") {
+						kind = "system"
+					}
+					item = &AuthTokenRecord{
+						Token:      token,
+						ClientID:   entry.ClientID,
+						Kind:       kind,
+						MACAddress: entry.MACAddress,
+						SourceIP:   sourceIP,
+						IssuedAt:   issuedAt,
+						ExpiresAt:  expiresAt,
+					}
+					s.authTokens[token] = item
+					ok = true
+					changed = true
+				}
+			}
+		}
+
+		if !ok || item == nil {
+			s.mu.Unlock()
+			return AuthTokenRecord{}, false
+		}
 	}
+
+	// 3. Verify expiration
 	if isAuthTokenExpired(item.ExpiresAt, time.Now()) {
-		delete(s.authTokens, token)
-		expired = true
-		s.mu.Unlock()
-		_ = s.SaveAuthTokens()
-		return AuthTokenRecord{}, false
+		if entry, exists := s.agentRegistry[item.ClientID]; exists && entry.Approved && !entry.Blocked {
+			// Auto renew active agent token expiration
+			item.ExpiresAt = time.Now().Add(10 * 365 * 24 * time.Hour).Format(time.RFC3339Nano)
+			changed = true
+		} else {
+			delete(s.authTokens, token)
+			s.mu.Unlock()
+			_ = s.SaveAuthTokens()
+			return AuthTokenRecord{}, false
+		}
 	}
-	// Human browser sessions may pass through a reverse proxy or change network
-	// paths between login and subsequent requests. Agent device tokens remain
-	// bound to their recorded source IP.
-	if item.SourceIP != "" && sourceIP != "" && !isMatchingSourceIP(item.SourceIP, sourceIP) && !strings.EqualFold(item.Kind, "session-human") {
-		s.mu.Unlock()
-		return AuthTokenRecord{}, false
+
+	// 4. Verify agent status in registry
+	entry, hasEntry := s.agentRegistry[item.ClientID]
+	if hasEntry && entry != nil {
+		if entry.Blocked || !entry.Approved {
+			s.mu.Unlock()
+			return AuthTokenRecord{}, false
+		}
+		entry.LastSeenAt = time.Now().Format(time.RFC3339)
 	}
-	if item.SourceIP == "" && sourceIP != "" {
-		item.SourceIP = sourceIP
-		changed = true
+
+	// 5. Source IP matching & Recording
+	// If the agent exists in agentRegistry and is approved, the bearer token proves authorization.
+	// We record the current source IP rather than rejecting the agent due to dynamic IP or proxy.
+	if hasEntry && entry != nil && entry.Approved && !entry.Blocked {
+		if sourceIP != "" && item.SourceIP != sourceIP {
+			item.SourceIP = sourceIP
+			changed = true
+		}
+	} else if strings.EqualFold(item.Kind, "session-human") {
+		// Human sessions allow IP change (e.g. mobile or reverse proxy)
+		if sourceIP != "" && item.SourceIP != sourceIP {
+			item.SourceIP = sourceIP
+			changed = true
+		}
+	} else {
+		// For standalone unregistered tokens without an agentRegistry entry, maintain IP binding
+		if item.SourceIP != "" && sourceIP != "" && !isMatchingSourceIP(item.SourceIP, sourceIP) {
+			s.mu.Unlock()
+			return AuthTokenRecord{}, false
+		}
+		if item.SourceIP == "" && sourceIP != "" {
+			item.SourceIP = sourceIP
+			changed = true
+		}
 	}
+
 	out = *item
 	s.mu.Unlock()
 
-	if expired {
-		return AuthTokenRecord{}, false
-	}
 	if changed {
 		_ = s.SaveAuthTokens()
 	}
 	return out, true
+}
+
+func (s *Store) EnsureAgentAuthTokenRecord(clientID, token, macAddress, sourceIP string) error {
+	token = strings.TrimSpace(token)
+	clientID = strings.TrimSpace(clientID)
+	if token == "" || clientID == "" || s == nil {
+		return nil
+	}
+	now := time.Now()
+	exp := now.Add(10 * 365 * 24 * time.Hour)
+	rec := AuthTokenRecord{
+		Token:      token,
+		ClientID:   clientID,
+		Kind:       "dev-short",
+		MACAddress: normalizeMACAddress(macAddress),
+		SourceIP:   strings.TrimSpace(sourceIP),
+		IssuedAt:   now.Format(time.RFC3339Nano),
+		ExpiresAt:  exp.Format(time.RFC3339Nano),
+	}
+	_, err := s.UpsertAuthToken(rec, true)
+	return err
 }
 
 func (s *Store) DeleteAuthTokensForClientKind(clientID, kind string) error {

@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -89,5 +92,136 @@ func TestAgentRoleOperations(t *testing.T) {
 	isAdmin, modRooms, err = store.GetAgentRole(clientID)
 	if err != nil || !isAdmin || len(modRooms) != 0 {
 		t.Fatalf("unexpected role after removing mod: isAdmin=%v modRooms=%v err=%v", isAdmin, modRooms, err)
+	}
+}
+
+func TestCreateRoomFullAndAdminAPI(t *testing.T) {
+	store := NewStore(t.TempDir(), 20, false)
+	adminAPI := &PermissionsAPI{Store: store}
+
+	// 1. Test CreateRoomFull
+	room, err := store.CreateRoomFull("default", "golang", "Go語言研討", "程式語言", "討論Go語言生態", "gopher", true)
+	if err != nil {
+		t.Fatalf("CreateRoomFull failed: %v", err)
+	}
+	if room.ID != "golang" || room.Name != "Go語言研討" || !room.Pinned {
+		t.Fatalf("unexpected room created: %+v", room)
+	}
+
+	// 2. Test duplicate creation returns error
+	_, err = store.CreateRoomFull("default", "golang", "Go語言研討", "程式語言", "", "", false)
+	if err != ErrAlreadyExists {
+		t.Fatalf("expected ErrAlreadyExists, got %v", err)
+	}
+
+	// 3. Test Admin HTTP API /permissions/rooms/create
+	now := time.Now()
+	if _, err := store.UpsertAuthToken(AuthTokenRecord{
+		Token:     "test-root-token",
+		ClientID:  "root",
+		Kind:      "session-human",
+		SourceIP:  "127.0.0.1",
+		IssuedAt:  now.Format(time.RFC3339Nano),
+		ExpiresAt: now.Add(time.Hour).Format(time.RFC3339Nano),
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"room_id":"ai-news","name":"AI快訊","category":"人工智慧","owner":"system","pinned":true}`
+	req := httptest.NewRequest(http.MethodPost, "http://example.test/permissions/rooms/create", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("Authorization", "Bearer test-root-token")
+	w := httptest.NewRecorder()
+	respBytes := adminAPI.Process(w, req, nil, nil, nil, body)
+	respJSON := string(respBytes)
+	if !strings.Contains(respJSON, `"ok":true`) || !strings.Contains(respJSON, `"ai-news"`) {
+		t.Fatalf("unexpected API response: %s", respJSON)
+	}
+
+	// 4. Verify room exists in store
+	rooms := store.ListAllRooms(time.Now())
+	found := false
+	for _, r := range rooms {
+		if r.RoomID == "ai-news" && r.Pinned {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("created room ai-news not found or not pinned in ListAllRooms")
+	}
+}
+
+func TestPermissionsAPI_AdminPasswordUpdate(t *testing.T) {
+	store := NewStore(t.TempDir(), 20, false)
+	store.SetDefaultAdminPassword("root")
+	adminAPI := &PermissionsAPI{Store: store}
+	authAPI := &HttpAPI_auth{
+		DefaultAccount:  "root",
+		DefaultPassword: "root",
+		Store:           store,
+	}
+
+	// Register root session token
+	now := time.Now()
+	rootToken := "root-session-token-999"
+	if _, err := store.UpsertAuthToken(AuthTokenRecord{
+		Token:     rootToken,
+		ClientID:  "root",
+		Kind:      "session-human",
+		SourceIP:  "127.0.0.1",
+		IssuedAt:  now.Format(time.RFC3339Nano),
+		ExpiresAt: now.Add(time.Hour).Format(time.RFC3339Nano),
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	callPasswordAPI := func(body string) string {
+		req := httptest.NewRequest(http.MethodPost, "http://example.test/permissions/admin-password", strings.NewReader(body))
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("Authorization", "Bearer "+rootToken)
+		w := httptest.NewRecorder()
+		return string(adminAPI.Process(w, req, nil, nil, nil, body))
+	}
+
+	// 1. Wrong old password
+	respWrong := callPasswordAPI(`{"old_password":"wrong","new_password":"newpass123","confirm_password":"newpass123"}`)
+	if !strings.Contains(respWrong, "目前密碼輸入錯誤") {
+		t.Fatalf("expected wrong password error, got: %s", respWrong)
+	}
+
+	// 2. Mismatched confirm password
+	respMismatch := callPasswordAPI(`{"old_password":"root","new_password":"newpass123","confirm_password":"different"}`)
+	if !strings.Contains(respMismatch, "兩次輸入的新密碼不一致") {
+		t.Fatalf("expected mismatch error, got: %s", respMismatch)
+	}
+
+	// 3. Valid update
+	respOK := callPasswordAPI(`{"old_password":"root","new_password":"secretAdminPassword!","confirm_password":"secretAdminPassword!"}`)
+	if !strings.Contains(respOK, `"ok":true`) {
+		t.Fatalf("expected success, got: %s", respOK)
+	}
+
+	// Verify store has new password
+	if store.GetAdminPassword() != "secretAdminPassword!" {
+		t.Fatalf("store password not updated, got: %s", store.GetAdminPassword())
+	}
+
+	// 4. Test /auth/login with old password -> must FAIL
+	wLoginOld := httptest.NewRecorder()
+	rLoginOld := httptest.NewRequest(http.MethodPost, "http://example.test/auth/login", strings.NewReader(`{"account":"root","password":"root"}`))
+	rLoginOld.RemoteAddr = "127.0.0.1:1234"
+	resLoginOld := string(authAPI.Process(wLoginOld, rLoginOld, nil, []string{"login"}, nil, `{"account":"root","password":"root"}`))
+	if !strings.Contains(resLoginOld, "login failed") {
+		t.Fatalf("expected old password login to fail, got: %s", resLoginOld)
+	}
+
+	// 5. Test /auth/login with new password -> must SUCCEED
+	wLoginNew := httptest.NewRecorder()
+	rLoginNew := httptest.NewRequest(http.MethodPost, "http://example.test/auth/login", strings.NewReader(`{"account":"root","password":"secretAdminPassword!"}`))
+	rLoginNew.RemoteAddr = "127.0.0.1:1234"
+	resLoginNew := string(authAPI.Process(wLoginNew, rLoginNew, nil, []string{"login"}, nil, `{"account":"root","password":"secretAdminPassword!"}`))
+	if !strings.Contains(resLoginNew, `"ok":true`) {
+		t.Fatalf("expected new password login to succeed, got: %s", resLoginNew)
 	}
 }

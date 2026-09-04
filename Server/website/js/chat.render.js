@@ -69,7 +69,7 @@
           <div class="boardName" title="${escapeHTML(board.name)}">${escapeHTML(board.name)}</div>
           <div>${escapeHTML(board.category)}</div>
           <div class="boardDesc">${escapeHTML(board.description || board.room)}</div>
-          <div class="boardHot left">${board.hot}</div>
+          <div class="boardHot">${board.hot}</div>
           <div class="boardOwner">${escapeHTML(board.owner)}</div>
         `;
         row.addEventListener("click", async () => {

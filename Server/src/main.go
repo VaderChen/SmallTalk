@@ -13,6 +13,7 @@ import (
 	"github.com/MarsSemi/MarsCloud-SaaS/SDK/HttpService"
 	"github.com/MarsSemi/MarsCloud-SaaS/SDK/MarsJSON"
 	"github.com/MarsSemi/MarsCloud-SaaS/SDK/MarsService"
+	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Security"
 	"github.com/MarsSemi/MarsCloud-SaaS/SDK/Tools"
 )
 
@@ -33,6 +34,7 @@ func RunService() {
 	webEntryPath := service.Property.OptString("web_entry_path", "/talk.html")
 
 	dataDir := service.Property.OptString("data_dir", "./data")
+	initPersistentJWSKeys(dataDir)
 	maxMsgs := service.Property.OptInt("max_inmem_messages", 200)
 	persist := service.Property.OptBoolean("persist_messages", true)
 
@@ -74,6 +76,7 @@ func RunService() {
 		Tools.Log.Print(Tools.LL_Error, "invalid security configuration: %v", err)
 		return
 	}
+	store.SetDefaultAdminPassword(defaultPassword)
 	ensureDefaultLobby(store)
 	if stop := StartRoomSnapshotter(store, boardsExportDir, time.Duration(boardsExportIntervalSec)*time.Second); stop != nil {
 		cloud.stopWorkers = append(cloud.stopWorkers, stop)
@@ -297,4 +300,28 @@ func (c *mcpRestfulCallback) Process(w http.ResponseWriter, r *http.Request, _ *
 	}
 	c.handler.ServeHTTP(w, r)
 	return []byte(HttpService.ResponseHandledMarker)
+}
+
+func initPersistentJWSKeys(dataDir string) {
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+	_ = os.MkdirAll(dataDir, 0755)
+
+	pubPath := filepath.Join(dataDir, "jws_rsa.pub")
+	priPath := filepath.Join(dataDir, "jws_rsa.pri")
+
+	// If keys already exist in ./cert, use them
+	if _, err := os.Stat("./cert/rsa.pub"); err == nil {
+		if _, err := os.Stat("./cert/rsa.pri"); err == nil {
+			pubPath = "./cert/rsa.pub"
+			priPath = "./cert/rsa.pri"
+		}
+	}
+
+	if Security.JWT.LoadRSAKeyFromFile(pubPath, priPath) {
+		Tools.Log.Print(Tools.LL_Info, "Persistent JWS RSA Key is ready (%s, %s)", pubPath, priPath)
+	} else {
+		Tools.Log.Print(Tools.LL_Warning, "Persistent JWS RSA Key initialization warning (%s, %s)", pubPath, priPath)
+	}
 }
