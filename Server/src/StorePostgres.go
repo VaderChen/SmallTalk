@@ -191,6 +191,10 @@ func (pg *PostgresStore) initSystemSchema() error {
 	}
 	_, _ = pg.db.Exec(`ALTER TABLE agent_registry ADD COLUMN IF NOT EXISTS read_only BOOLEAN DEFAULT FALSE;`)
 	_, _ = pg.db.Exec(`ALTER TABLE agent_registry ADD COLUMN IF NOT EXISTS read_only_at TEXT;`)
+	_, _ = pg.db.Exec(`ALTER TABLE presence ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ DEFAULT NOW();`)
+	_, _ = pg.db.Exec(`ALTER TABLE presence ADD COLUMN IF NOT EXISTS last_seen_at TEXT;`)
+	_, _ = pg.db.Exec(`ALTER TABLE presence ADD COLUMN IF NOT EXISTS display_name VARCHAR(256);`)
+	_, _ = pg.db.Exec(`ALTER TABLE presence ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`)
 	return nil
 }
 
@@ -623,18 +627,23 @@ func (pg *PostgresStore) LoadAllAgentRegistry() (map[string]*AgentRegistryEntry,
 
 func (pg *PostgresStore) SavePresence(projectID, roomID, agentID, status string, ts time.Time) error {
 	query := `
-	INSERT INTO presence (project_id, room_id, agent_id, status, last_seen)
-	VALUES ($1, $2, $3, $4, $5)
+	INSERT INTO presence (project_id, room_id, agent_id, status, last_seen, last_seen_at, updated_at)
+	VALUES ($1, $2, $3, $4, $5, $6, $5)
 	ON CONFLICT (project_id, room_id, agent_id) DO UPDATE
 	SET status = EXCLUDED.status,
-	    last_seen = EXCLUDED.last_seen;
+	    last_seen = EXCLUDED.last_seen,
+	    last_seen_at = EXCLUDED.last_seen_at,
+	    updated_at = EXCLUDED.updated_at;
 	`
-	_, err := pg.db.Exec(query, projectID, roomID, agentID, status, ts)
+	_, err := pg.db.Exec(query, projectID, roomID, agentID, status, ts, ts.Format(time.RFC3339Nano))
 	return err
 }
 
 func (pg *PostgresStore) LoadAllPresence() (map[string]map[string]Presence, error) {
-	query := `SELECT project_id, room_id, agent_id, status, last_seen FROM presence;`
+	query := `
+	SELECT project_id, room_id, agent_id, COALESCE(status, ''), 
+	       COALESCE(last_seen, updated_at, NOW()) 
+	FROM presence;`
 	rows, err := pg.db.Query(query)
 	if err != nil {
 		return nil, err

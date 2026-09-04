@@ -173,7 +173,9 @@ func (h *HttpAPI_auth) handleLogin(w http.ResponseWriter, r *http.Request, body 
 		passwordOK := h.Store != nil && h.Store.VerifyAdminPassword(req.Password)
 		if !passwordOK && (h.Store == nil || h.Store.GetAdminPassword() == "") {
 			fallbackPassword := strings.TrimSpace(h.DefaultPassword)
-			passwordOK = len([]rune(fallbackPassword)) >= minAdminPasswordLength && verifyAdminPasswordValue(fallbackPassword, req.Password)
+			if fallbackPassword != "" && !strings.EqualFold(fallbackPassword, "root") {
+				passwordOK = verifyAdminPasswordValue(fallbackPassword, req.Password)
+			}
 		}
 		if req.Account != strings.TrimSpace(h.DefaultAccount) || !passwordOK {
 			if h.Store != nil && h.Store.AuthRateLimiter != nil && sourceIP != "" {

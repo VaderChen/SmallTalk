@@ -31,7 +31,7 @@ func (s *Store) SetDefaultAdminPassword(pwd string) {
 		return
 	}
 	pwd = strings.TrimSpace(pwd)
-	if len([]rune(pwd)) < minAdminPasswordLength {
+	if pwd == "" || strings.EqualFold(pwd, "root") {
 		return
 	}
 	s.adminPasswordMu.Lock()
