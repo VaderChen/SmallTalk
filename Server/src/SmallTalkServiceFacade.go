@@ -18,6 +18,7 @@ const (
 // SmallTalkFacade is the protocol-neutral application boundary used by REST and MCP.
 type SmallTalkFacade struct {
 	Store *Store
+	Email *EmailManager
 }
 
 func (s *SmallTalkFacade) authorizeRoom(clientID, projectID, roomID string) error {

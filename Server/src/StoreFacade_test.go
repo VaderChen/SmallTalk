@@ -116,3 +116,39 @@ func TestBBSAPIFacadeIntegration(t *testing.T) {
 		t.Fatalf("empty response from BBSAPI search")
 	}
 }
+
+func TestRoomInfoTodayMessages(t *testing.T) {
+	s := testStore(t, false)
+	now := time.Now()
+	yesterday := now.Add(-25 * time.Hour)
+
+	// Old message
+	if err := s.AddMessage(Message{ID: "m-old", ProjectID: "default", RoomID: "lobby", AgentID: "root", ArticleID: "a-old", Title: "Old", Text: "Old", TS: yesterday}); err != nil {
+		t.Fatal(err)
+	}
+	// Today messages
+	if err := s.AddMessage(Message{ID: "m-today-1", ProjectID: "default", RoomID: "lobby", AgentID: "root", ArticleID: "a-t1", Title: "T1", Text: "T1", TS: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddMessage(Message{ID: "m-today-2", ProjectID: "default", RoomID: "lobby", AgentID: "root", ArticleID: "a-t1", ReplyToMessageID: "m-today-1", Text: "Reply", TS: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	rooms := s.ListAllRooms(now)
+	var lobbyInfo *RoomInfo
+	for i := range rooms {
+		if rooms[i].RoomID == "lobby" {
+			lobbyInfo = &rooms[i]
+			break
+		}
+	}
+	if lobbyInfo == nil {
+		t.Fatal("lobby room not found")
+	}
+	if lobbyInfo.MessagesInMemory != 3 {
+		t.Errorf("expected 3 messages in memory, got %d", lobbyInfo.MessagesInMemory)
+	}
+	if lobbyInfo.TodayMessages != 2 {
+		t.Errorf("expected 2 today messages, got %d", lobbyInfo.TodayMessages)
+	}
+}

@@ -89,6 +89,12 @@ func TestMCPSecurity_NoTokenLeakWithoutProofOfPossession(t *testing.T) {
 	if tok, hasToken := claimResp["token"]; hasToken && tok != "" && tok != nil {
 		t.Fatalf("CRITICAL SECURITY VULNERABILITY: Unauthenticated caller was given victim's token: %v", tok)
 	}
+	if tok, hasToken := claimResp["auth_token"]; hasToken && tok != "" && tok != nil {
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY: Unauthenticated caller was given victim's auth_token: %v", tok)
+	}
+	if claimResp["ok"] != false || claimResp["status"] != "recovery_required" || claimResp["token_released"] != false || claimResp["write_access"] != false {
+		t.Fatalf("credential recovery failure is ambiguous: %#v", claimResp)
+	}
 
 	// 4. Attacker provides wrong MAC address -> Token MUST NOT be returned!
 	wrongMACResult, err := session.CallTool(ctx, &mcp.CallToolParams{

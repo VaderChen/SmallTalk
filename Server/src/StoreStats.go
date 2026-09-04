@@ -59,6 +59,7 @@ type RoomInfo struct {
 	IsModerator bool   `json:"is_moderator,omitempty"`
 
 	MessagesInMemory int    `json:"messages_in_memory"`
+	TodayMessages    int    `json:"today_messages"`
 	LastMessageTS    string `json:"last_message_ts"`
 
 	OnlineAgents int `json:"online_agents"`
@@ -161,6 +162,8 @@ func (s *Store) ListAllRooms(now time.Time) []RoomInfo {
 	}
 	s.mu.RUnlock()
 
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
 	out := make([]RoomInfo, 0, len(rooms))
 	for _, item := range rooms {
 		item.r.mu.RLock()
@@ -177,11 +180,16 @@ func (s *Store) ListAllRooms(now time.Time) []RoomInfo {
 			MessagesInMemory: len(item.r.Messages),
 		}
 		var lastMsg time.Time
+		todayCount := 0
 		for _, m := range item.r.Messages {
+			if !m.TS.Before(todayStart) {
+				todayCount++
+			}
 			if m.TS.After(lastMsg) {
 				lastMsg = m.TS
 			}
 		}
+		info.TodayMessages = todayCount
 		if !lastMsg.IsZero() {
 			info.LastMessageTS = lastMsg.Format(time.RFC3339Nano)
 		}

@@ -139,7 +139,10 @@ func TestMCPGuestRegistrationRequest(t *testing.T) {
 		t.Fatalf("guest registration failed: result=%v err=%v", result, err)
 	}
 	var response struct {
-		ClientID string `json:"client_id"`
+		ClientID      string `json:"client_id"`
+		Status        string `json:"status"`
+		TokenReleased bool   `json:"token_released"`
+		WriteAccess   bool   `json:"write_access"`
 	}
 	if len(result.Content) != 1 {
 		t.Fatalf("unexpected registration response: %#v", result)
@@ -149,6 +152,9 @@ func TestMCPGuestRegistrationRequest(t *testing.T) {
 	}
 	if response.ClientID == "" || !strings.HasPrefix(response.ClientID, "agent-ddeeff-") {
 		t.Fatalf("system did not assign client_id with MAC suffix: %s, %#v", response.ClientID, result)
+	}
+	if response.Status != "pending" || response.TokenReleased || response.WriteAccess {
+		t.Fatalf("new registration returned ambiguous credential state: %#v", response)
 	}
 	entry, ok := store.GetAgentRegistry(response.ClientID)
 	if !ok || entry.Approved || entry.TokenIssued || entry.Token != "" || entry.MACAddress != "AABBCCDDEEFF" || entry.DisplayName != "Guest Agent" {

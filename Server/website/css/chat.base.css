@@ -159,7 +159,7 @@
 
     .boardHead,
     .boardRow {
-      grid-template-columns: 22px 60px 190px 68px minmax(140px, 1fr) 64px 120px;
+      grid-template-columns: 22px 60px 190px 68px minmax(140px, 1fr) 56px 64px 120px;
       column-gap: 8px;
     }
 
@@ -174,13 +174,15 @@
     }
 
     .boardHead > :nth-child(6),
-    .boardRow > :nth-child(6) {
+    .boardRow > :nth-child(6),
+    .boardHead > :nth-child(7),
+    .boardRow > :nth-child(7) {
       text-align: center;
       padding: 0 2px;
     }
 
-    .boardHead > :nth-child(7),
-    .boardRow > :nth-child(7) {
+    .boardHead > :nth-child(8),
+    .boardRow > :nth-child(8) {
       padding-left: 4px;
     }
 
@@ -218,6 +220,7 @@
     .threadDate,
     .threadTodayReplies,
     .threadReplies,
+    .boardToday,
     .boardOwner {
       min-width: 0;
     }
@@ -308,6 +311,18 @@
       font-weight: 700;
     }
 
+    .boardToday {
+      color: var(--muted);
+      font-weight: 700;
+      text-align: center;
+      overflow: hidden;
+      text-overflow: clip;
+    }
+
+    .boardToday.todayActive {
+      color: var(--yellow);
+    }
+
     .threadReplies {
       color: var(--cyan);
       text-align: left;
@@ -362,6 +377,7 @@
     .activeRow .menuKey,
     .activeRow .boardNo,
     .activeRow .boardName,
+    .activeRow .boardToday,
     .activeRow .boardHot,
     .activeRow .boardOwner,
     .activeRow .threadReplies {

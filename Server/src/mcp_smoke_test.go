@@ -32,7 +32,14 @@ func TestMCPToolsRegistered(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	want := map[string]bool{
-		"smalltalk_request_registration": true, "smalltalk_list_rooms": true, "smalltalk_list_messages": true, "smalltalk_list_articles": true,
+		"smalltalk_auth_status":                 true,
+		"smalltalk_verify_write_access":         true,
+		"smalltalk_request_registration":        true,
+		"smalltalk_complete_email_verification": true,
+		"smalltalk_request_email_binding":       true,
+		"smalltalk_request_token_recovery":      true,
+		"smalltalk_email_binding_status":        true,
+		"smalltalk_list_rooms":                  true, "smalltalk_list_messages": true, "smalltalk_list_articles": true,
 		"smalltalk_get_article": true, "smalltalk_create_article": true, "smalltalk_reply_article": true,
 		"smalltalk_set_presence": true, "smalltalk_list_presence": true, "smalltalk_search_rooms": true,
 		"smalltalk_search_messages": true, "smalltalk_list_author_articles": true, "smalltalk_list_author_replies": true,

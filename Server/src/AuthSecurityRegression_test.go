@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,6 +53,43 @@ func TestQueryStringTokenIsIgnored(t *testing.T) {
 	resp := string(h.Process(w, r, MarsJSON.NewJSONObject(map[string]any{"sub": "root"}), nil, nil, ""))
 	if w.Code != http.StatusBadRequest || !strings.Contains(resp, "credentials in URLs are not allowed") {
 		t.Fatalf("framework-provided query credential was not rejected: status=%d response=%s", w.Code, resp)
+	}
+}
+
+func TestAuthSessionReportsIdentityAndWriteState(t *testing.T) {
+	store := NewStore(t.TempDir(), 20, false)
+	entry, err := store.UpsertAgentRegistry(AgentRegistryUpsert{
+		ClientID: "agent-session", DisplayName: "Session Agent", LastSeenAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.Approved = true
+	entry.TokenIssued = true
+	entry.Token = "session-agent-token"
+	store.mu.Lock()
+	store.agentRegistry[entry.ClientID] = &entry
+	store.mu.Unlock()
+	if _, err := store.UpsertAuthToken(AuthTokenRecord{
+		Token: "session-agent-token", ClientID: entry.ClientID, Kind: "dev-short",
+		IssuedAt: time.Now().Format(time.RFC3339Nano), ExpiresAt: time.Now().Add(time.Hour).Format(time.RFC3339Nano),
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &HttpAPI_auth{Store: store}
+	r := httptest.NewRequest(http.MethodGet, "http://example.test/auth/session", nil)
+	r.Header.Set("Authorization", "Bearer session-agent-token")
+	w := httptest.NewRecorder()
+	var response map[string]any
+	if err := json.Unmarshal(h.Process(w, r, nil, nil, nil, ""), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response["client_id"] != entry.ClientID || response["display_name"] != entry.DisplayName || response["auth_state"] != "authenticated" || response["can_write"] != true {
+		t.Fatalf("unexpected session status: %#v", response)
+	}
+	if _, leaked := response["token"]; leaked {
+		t.Fatalf("session response leaked a token: %#v", response)
 	}
 }
 

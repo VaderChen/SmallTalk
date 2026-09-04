@@ -25,6 +25,7 @@ type HttpAPI_auth struct {
 	WebEntryPath    string
 	MarsClient      *MarsClient.MarsClient
 	Store           *Store
+	Email           *EmailManager
 }
 
 func (h *HttpAPI_auth) setMarsClient(client *MarsClient.MarsClient) {
@@ -93,6 +94,11 @@ func (h *HttpAPI_auth) Process(w http.ResponseWriter, r *http.Request, jwt *Mars
 	if len(p) == 0 {
 		return mustJSON(ErrorResponse{Error: "not found"})
 	}
+	if p[0] == "email" && w != nil {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+	}
 	if p[0] == "web-config" {
 		entry := strings.TrimSpace(h.WebEntryPath)
 		if entry == "" || !strings.HasPrefix(entry, "/") || strings.HasPrefix(entry, "//") {
@@ -100,7 +106,8 @@ func (h *HttpAPI_auth) Process(w http.ResponseWriter, r *http.Request, jwt *Mars
 		}
 		return mustJSON(map[string]string{"web_entry_path": entry})
 	}
-	if p[0] != "login" && p[0] != "logout" && p[0] != "projects" && p[0] != "devRegister" && p[0] != "devLogin" {
+	publicEmailEndpoint := p[0] == "email" && len(p) == 2 && (p[1] == "complete" || p[1] == "agent-complete" || p[1] == "recovery")
+	if p[0] != "login" && p[0] != "logout" && p[0] != "projects" && p[0] != "devRegister" && p[0] != "devLogin" && !publicEmailEndpoint {
 		if _, ok := requireAuthorizedRequest(r, jwt, h.Store); !ok {
 			return mustJSON(ErrorResponse{Error: "unauthorized"})
 		}
@@ -117,7 +124,35 @@ func (h *HttpAPI_auth) Process(w http.ResponseWriter, r *http.Request, jwt *Mars
 		if !ok {
 			return mustJSON(ErrorResponse{Error: "unauthorized"})
 		}
-		return mustJSON(map[string]any{"ok": true, "client_id": principal.ClientID, "principal_type": principal.PrincipalType})
+		displayName := strings.TrimSpace(principal.ClientID)
+		authState := "authenticated"
+		canWrite := !strings.EqualFold(strings.TrimSpace(principal.PrincipalType), "guest")
+		if h.Store != nil {
+			if entry, exists := h.Store.GetAgentRegistry(principal.ClientID); exists {
+				if strings.TrimSpace(entry.DisplayName) != "" {
+					displayName = strings.TrimSpace(entry.DisplayName)
+				}
+				switch {
+				case entry.Blocked:
+					authState = "blocked"
+					canWrite = false
+				case !entry.Approved:
+					authState = "pending"
+					canWrite = false
+				case h.Store.IsAgentReadOnly(principal.ClientID):
+					authState = "read_only"
+					canWrite = false
+				}
+			}
+		}
+		return mustJSON(map[string]any{
+			"ok":             true,
+			"client_id":      principal.ClientID,
+			"display_name":   displayName,
+			"principal_type": principal.PrincipalType,
+			"auth_state":     authState,
+			"can_write":      canWrite,
+		})
 	}
 	if len(p) >= 1 && p[0] == "projects" {
 		return h.handleProjects()
@@ -127,6 +162,20 @@ func (h *HttpAPI_auth) Process(w http.ResponseWriter, r *http.Request, jwt *Mars
 	}
 	if len(p) >= 1 && p[0] == "devLogin" {
 		return h.handleDevLogin(r, body, isPOST)
+	}
+	if len(p) == 2 && p[0] == "email" {
+		switch p[1] {
+		case "complete":
+			return h.handleEmailComplete(r, body, isPOST)
+		case "agent-complete":
+			return h.handleEmailAgentComplete(r, body, isPOST)
+		case "recovery":
+			return h.handleEmailRecovery(r, body, isPOST)
+		case "bind":
+			return h.handleEmailBinding(r, jwt, body, isPOST)
+		case "status":
+			return h.handleEmailStatus(r, jwt)
+		}
 	}
 	if len(p) >= 1 && p[0] == "registry" {
 		if r.Method == http.MethodDelete {
@@ -341,6 +390,28 @@ func (h *HttpAPI_auth) handleDevRegister(r *http.Request, body string, isPOST bo
 			}
 		}
 	}
+	if h.Email != nil {
+		if strings.TrimSpace(req.Email) == "" {
+			return mustJSON(ErrorResponse{Error: "email is required for a new account"})
+		}
+		receipt, err := h.Email.RequestRegistration(r.Context(), req.ClientID, req.DisplayName, req.MACAddress, req.Email, sourceIP)
+		if err != nil {
+			return mustJSON(ErrorResponse{Error: err.Error()})
+		}
+		responseClientID := receipt.ClientID
+		if responseClientID == "" {
+			responseClientID = req.ClientID
+		}
+		return mustJSON(map[string]any{
+			"ok":     receipt.Status != "daily_registration_limit_reached" && receipt.Status != "email_recently_sent",
+			"status": receipt.Status, "account_status": "not_created",
+			"client_id": responseClientID, "display_name": req.DisplayName,
+			"challenge_id": receipt.ChallengeID, "expires_at": receipt.ExpiresAt,
+			"retry_at": receipt.RetryAt, "email_sent": receipt.EmailSent,
+			"daily_registration_limit": receipt.DailyRegistrationLimit,
+			"token_released":           false, "write_access": false, "message": receipt.Message,
+		})
+	}
 
 	entry, err := h.Store.UpsertAgentRegistry(AgentRegistryUpsert{
 		ClientID:    req.ClientID,
@@ -367,6 +438,92 @@ func (h *HttpAPI_auth) handleDevRegister(r *http.Request, body string, isPOST bo
 		TokenIssued: entry.TokenIssued,
 		Message:     "註冊成功，請等待後台核發 Token。",
 	})
+}
+
+func (h *HttpAPI_auth) handleEmailComplete(r *http.Request, body string, isPOST bool) []byte {
+	if !isPOST {
+		return mustJSON(ErrorResponse{Error: "post required"})
+	}
+	if h == nil || h.Email == nil {
+		return mustJSON(ErrorResponse{Error: "email verification is unavailable"})
+	}
+	var req EmailChallengeCompleteRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		return mustJSON(ErrorResponse{Error: "invalid json"})
+	}
+	result, err := h.Email.Complete(r.Context(), req.ChallengeID, req.LinkToken, req.Code, sourceIPOfWithStore(r, h.Store))
+	if err != nil {
+		return mustJSON(ErrorResponse{Error: err.Error()})
+	}
+	return mustJSON(result)
+}
+
+func (h *HttpAPI_auth) handleEmailAgentComplete(r *http.Request, body string, isPOST bool) []byte {
+	if !isPOST {
+		return mustJSON(ErrorResponse{Error: "post required"})
+	}
+	if h == nil || h.Email == nil {
+		return mustJSON(ErrorResponse{Error: "email verification is unavailable"})
+	}
+	var req EmailAgentCompleteRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		return mustJSON(ErrorResponse{Error: "invalid json"})
+	}
+	result, err := h.Email.CompleteAgent(r.Context(), req.ChallengeID, req.AgentToken, sourceIPOfWithStore(r, h.Store))
+	if err != nil {
+		return mustJSON(ErrorResponse{Error: err.Error()})
+	}
+	return mustJSON(result)
+}
+
+func (h *HttpAPI_auth) handleEmailRecovery(r *http.Request, body string, isPOST bool) []byte {
+	if !isPOST {
+		return mustJSON(ErrorResponse{Error: "post required"})
+	}
+	if h == nil || h.Email == nil {
+		return mustJSON(ErrorResponse{Error: "email verification is unavailable"})
+	}
+	var req EmailRecoveryRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		return mustJSON(ErrorResponse{Error: "invalid json"})
+	}
+	return mustJSON(h.Email.RequestRecovery(r.Context(), req.ClientID, req.Email, sourceIPOfWithStore(r, h.Store)))
+}
+
+func (h *HttpAPI_auth) handleEmailBinding(r *http.Request, jwt *MarsJSON.JSONObject, body string, isPOST bool) []byte {
+	if !isPOST {
+		return mustJSON(ErrorResponse{Error: "post required"})
+	}
+	if h == nil || h.Email == nil {
+		return mustJSON(ErrorResponse{Error: "email verification is unavailable"})
+	}
+	principal, ok := requireAuthorizedRequest(r, jwt, h.Store)
+	if !ok || principal == nil || strings.EqualFold(principal.ClientID, "guest") {
+		return mustJSON(ErrorResponse{Error: "authenticated account required"})
+	}
+	var req EmailBindingRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		return mustJSON(ErrorResponse{Error: "invalid json"})
+	}
+	receipt, err := h.Email.RequestBinding(r.Context(), principal.ClientID, req.Email, sourceIPOfWithStore(r, h.Store))
+	if err != nil {
+		return mustJSON(ErrorResponse{Error: err.Error()})
+	}
+	return mustJSON(receipt)
+}
+
+func (h *HttpAPI_auth) handleEmailStatus(r *http.Request, jwt *MarsJSON.JSONObject) []byte {
+	if r.Method != http.MethodGet {
+		return mustJSON(ErrorResponse{Error: "get required"})
+	}
+	if h == nil || h.Email == nil {
+		return mustJSON(ErrorResponse{Error: "email verification is unavailable"})
+	}
+	principal, ok := requireAuthorizedRequest(r, jwt, h.Store)
+	if !ok || principal == nil || strings.EqualFold(principal.ClientID, "guest") {
+		return mustJSON(ErrorResponse{Error: "authenticated account required"})
+	}
+	return mustJSON(h.Email.Status(principal.ClientID))
 }
 
 func (h *HttpAPI_auth) handleDevLogin(r *http.Request, body string, isPOST bool) []byte {

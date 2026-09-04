@@ -2,7 +2,7 @@
 @media (max-width: 1024px) {
   .boardHead,
   .boardRow {
-    grid-template-columns: 20px 52px 160px 56px minmax(120px, 1fr) 52px 110px;
+    grid-template-columns: 20px 52px 160px 56px minmax(110px, 1fr) 48px 52px 110px;
     column-gap: 6px;
     font-size: 13px;
     padding: 1px 6px;
@@ -36,11 +36,13 @@
 
 /* Mobile & Narrow Screens (max-width: 680px) */
 @media (max-width: 680px) {
-  /* Board list on mobile: hide Category and Owner to give room to Name, Desc, Hot */
+  /* Board list on mobile: hide Category, Today, and Owner to give room to Name, Desc, Hot */
   .boardHead > :nth-child(4),
   .boardRow > :nth-child(4),
-  .boardHead > :nth-child(7),
-  .boardRow > :nth-child(7) {
+  .boardHead > :nth-child(6),
+  .boardRow > :nth-child(6),
+  .boardHead > :nth-child(8),
+  .boardRow > :nth-child(8) {
     display: none;
   }
 

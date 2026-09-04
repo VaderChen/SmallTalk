@@ -318,6 +318,63 @@
       return articles[state.threadIndex] || null;
     }
 
+    const BOARD_CURSOR_PREFIX = "smalltalk_bbs_board_cursor_";
+    const sessionBoardCursors = new Map();
+
+    function getBoardRoomKey(board) {
+      if (!board) return "";
+      return String(board.room || board.room_id || board.board || "").trim().toLowerCase();
+    }
+
+    function getSavedBoardCursor(board, articles) {
+      if (!articles || !articles.length) return 0;
+      const roomKey = getBoardRoomKey(board);
+      let saved = null;
+      if (roomKey) {
+        if (sessionBoardCursors.has(roomKey)) {
+          saved = sessionBoardCursors.get(roomKey);
+        } else {
+          try {
+            const raw = sessionStorage.getItem(`${BOARD_CURSOR_PREFIX}${roomKey}`);
+            if (raw) {
+              saved = JSON.parse(raw);
+              if (saved && typeof saved === "object") {
+                sessionBoardCursors.set(roomKey, saved);
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (saved) {
+        if (saved.articleID) {
+          const idx = articles.findIndex((a) => a.articleID === saved.articleID);
+          if (idx >= 0) {
+            return idx;
+          }
+        }
+        if (typeof saved.index === "number" && !isNaN(saved.index)) {
+          return Math.max(0, Math.min(articles.length - 1, saved.index));
+        }
+      }
+
+      // Default: cursor on the newest article
+      return Math.max(0, articles.length - 1);
+    }
+
+    function saveBoardCursor(board, index, articleID) {
+      const roomKey = getBoardRoomKey(board);
+      if (!roomKey) return;
+      const data = {
+        index: typeof index === "number" ? index : 0,
+        articleID: String(articleID || "").trim()
+      };
+      sessionBoardCursors.set(roomKey, data);
+      try {
+        sessionStorage.setItem(`${BOARD_CURSOR_PREFIX}${roomKey}`, JSON.stringify(data));
+      } catch (_) {}
+    }
+
     function canEditCurrentArticle() {
       const article = currentArticleDetail();
       const rootMessage = article?.messages?.[0];
@@ -470,7 +527,6 @@
       const boardIndex = boards.findIndex((board) => board.room === lastBoardRoom);
       if (boardIndex >= 0) {
         state.boardIndex = boardIndex;
-        state.threadIndex = 0;
         if (lastLevel === "boards" || lastLevel === "threads" || lastLevel === "article") {
           state.level = lastLevel;
         }
@@ -485,6 +541,7 @@
         b.name,
         b.category,
         b.description,
+        b.today,
         b.hot,
         b.owner,
         b.updated,
@@ -503,6 +560,7 @@
           name: room.name || room.board,
           category: room.category || "未分類",
           description: room.description || "",
+          today: Number(room.today_messages || 0),
           hot: room.messages_in_memory || 0,
           owner: room.owner || "-",
           room: room.board,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,8 +69,47 @@ func TestMCPHTTPProtocolIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTTP tools/list failed: %v", err)
 	}
-	if len(tools.Tools) != 25 {
-		t.Fatalf("tools/list returned %d tools, want 25 public tools", len(tools.Tools))
+	if len(tools.Tools) != 31 {
+		t.Fatalf("tools/list returned %d tools, want 31 public tools", len(tools.Tools))
+	}
+
+	authStatus, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "smalltalk_auth_status", Arguments: map[string]any{}})
+	if err != nil || authStatus == nil || authStatus.IsError {
+		t.Fatalf("auth status failed: result=%v err=%v", authStatus, err)
+	}
+	var authState map[string]any
+	if err := json.Unmarshal([]byte(authStatus.Content[0].(*mcp.TextContent).Text), &authState); err != nil {
+		t.Fatal(err)
+	}
+	if authState["authenticated"] != true || authState["client_id"] != "agent-a" || authState["write_access"] != true {
+		t.Fatalf("unexpected authenticated state: %#v", authState)
+	}
+	if _, leaked := authState["token"]; leaked {
+		t.Fatalf("auth status leaked token field: %#v", authState)
+	}
+
+	writeAccess, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "smalltalk_verify_write_access", Arguments: map[string]any{"project_id": "default", "room_id": "public"}})
+	if err != nil || writeAccess == nil || writeAccess.IsError {
+		t.Fatalf("write access check failed: result=%v err=%v", writeAccess, err)
+	}
+	var writeState map[string]any
+	if err := json.Unmarshal([]byte(writeAccess.Content[0].(*mcp.TextContent).Text), &writeState); err != nil {
+		t.Fatal(err)
+	}
+	if writeState["status"] != "allowed" || writeState["write_access"] != true {
+		t.Fatalf("unexpected allowed write state: %#v", writeState)
+	}
+
+	deniedWriteAccess, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "smalltalk_verify_write_access", Arguments: map[string]any{"project_id": "default", "room_id": "private"}})
+	if err != nil || deniedWriteAccess == nil || deniedWriteAccess.IsError {
+		t.Fatalf("denied write access check failed: result=%v err=%v", deniedWriteAccess, err)
+	}
+	var deniedWriteState map[string]any
+	if err := json.Unmarshal([]byte(deniedWriteAccess.Content[0].(*mcp.TextContent).Text), &deniedWriteState); err != nil {
+		t.Fatal(err)
+	}
+	if deniedWriteState["status"] != "room_acl_denied" || deniedWriteState["write_access"] != false {
+		t.Fatalf("unexpected denied write state: %#v", deniedWriteState)
 	}
 
 	rooms, err := session.CallTool(ctx, &mcp.CallToolParams{
@@ -143,6 +183,17 @@ func TestMCPGuestReadAndWriteBoundaries(t *testing.T) {
 	rooms, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "smalltalk_list_rooms", Arguments: map[string]any{"project_id": "default"}})
 	if err != nil || rooms == nil || rooms.IsError {
 		t.Fatalf("Guest read failed: result=%v err=%v", rooms, err)
+	}
+	authStatus, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "smalltalk_auth_status", Arguments: map[string]any{}})
+	if err != nil || authStatus == nil || authStatus.IsError {
+		t.Fatalf("Guest auth status failed: result=%v err=%v", authStatus, err)
+	}
+	var authState map[string]any
+	if err := json.Unmarshal([]byte(authStatus.Content[0].(*mcp.TextContent).Text), &authState); err != nil {
+		t.Fatal(err)
+	}
+	if authState["authenticated"] != false || authState["can_read"] != true || authState["write_access"] != false || authState["status"] != "unauthenticated" {
+		t.Fatalf("Guest read/write boundary is ambiguous: %#v", authState)
 	}
 	write, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "smalltalk_create_article", Arguments: map[string]any{"project_id": "default", "room_id": "lobby", "title": "guest", "text": "must be rejected"}})
 	if err != nil || write == nil || !write.IsError {

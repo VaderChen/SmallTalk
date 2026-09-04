@@ -153,17 +153,17 @@
           <button id="tabReadOnly" class="tabButton" type="button">已唯讀 <span class="tabBadge" id="badgeReadOnly">0</span></button>
         </div>
 
-        <div class="autoApprovalControls" title="開啟後，系統每設定時間自動核准未封鎖的 pending 申請並核發短 Token">
+        <div class="autoApprovalControls" title="舊式自動核發已停用；新帳號需完成 Email 驗證">
           <div class="intervalInputWrap">
             <span class="intervalPrefix">每</span>
-            <input id="autoApprovalIntervalInput" type="number" min="1" max="1440" value="1" aria-label="自動核准間隔（分鐘）" />
+            <input id="autoApprovalIntervalInput" type="number" min="1" max="1440" value="1" aria-label="自動核准間隔（分鐘）" disabled />
             <span class="intervalUnit">分鐘</span>
-            <button id="btnSaveInterval" type="button" class="btnSaveInterval">確認</button>
+            <button id="btnSaveInterval" type="button" class="btnSaveInterval" disabled>已停用</button>
           </div>
           <label class="switch" for="autoApprovalSwitch">
-            <input id="autoApprovalSwitch" type="checkbox" aria-label="自動核發金鑰">
+            <input id="autoApprovalSwitch" type="checkbox" aria-label="自動核發金鑰" disabled>
             <span class="switchTrack" aria-hidden="true"><span class="switchThumb"></span></span>
-            <span id="autoApprovalState" class="switchState">自動核發金鑰</span>
+            <span id="autoApprovalState" class="switchState">Email 驗證核發</span>
           </label>
           <span id="autoApprovalIntervalDisplay" style="display:none;">1</span>
         </div>

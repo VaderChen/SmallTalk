@@ -69,9 +69,11 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 		switch r.Method {
 		case http.MethodGet:
 			return mustJSON(map[string]any{
-				"enabled":          api.Store.AutoApprovalEnabled(),
+				"enabled":          false,
 				"interval_minutes": api.Store.AutoApprovalIntervalMinutes(),
 				"interval":         fmt.Sprintf("%dm0s", api.Store.AutoApprovalIntervalMinutes()),
+				"deprecated":       true,
+				"message":          "舊式自動核准與自動核發已停用；新帳號由 Email 驗證完成後即時核發。",
 			})
 		case http.MethodPost:
 			if strings.TrimSpace(body) == "" && r.Body != nil {
@@ -88,6 +90,9 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 			enabled := api.Store.AutoApprovalEnabled()
 			if req.Enabled != nil {
 				enabled = *req.Enabled
+			}
+			if enabled {
+				return mustJSON(ErrorResponse{Error: "legacy auto approval is disabled; complete Email verification instead"})
 			}
 			intervalMin := api.Store.AutoApprovalIntervalMinutes()
 			if req.IntervalMinutes != nil && *req.IntervalMinutes > 0 {
@@ -490,6 +495,36 @@ func issueApprovedAgentToken(store *Store, clientID string) (AgentRegistryEntry,
 		MACAddress: entry.MACAddress,
 		IssuedAt:   issuedAt.Format(time.RFC3339Nano),
 		ExpiresAt:  expiresAt.Format(time.RFC3339Nano),
+	}, true); err != nil {
+		return AgentRegistryEntry{}, fmt.Errorf("save auth token failed")
+	}
+	return entry, nil
+}
+
+func rotateApprovedAgentToken(store *Store, clientID string) (AgentRegistryEntry, error) {
+	if store == nil {
+		return AgentRegistryEntry{}, fmt.Errorf("store not available")
+	}
+	entry, ok := store.GetAgentRegistry(clientID)
+	if !ok {
+		return AgentRegistryEntry{}, fmt.Errorf("agent not found")
+	}
+	if entry.Blocked {
+		return AgentRegistryEntry{}, fmt.Errorf("agent is blocked")
+	}
+	token, err := generateShortDevToken(32)
+	if err != nil {
+		return AgentRegistryEntry{}, fmt.Errorf("issue token failed")
+	}
+	issuedAt := time.Now()
+	expiresAt := issuedAt.Add(time.Duration(devShortTokenTTLSec) * time.Second)
+	entry, err = store.SetAgentIssuedToken(clientID, token, issuedAt, expiresAt)
+	if err != nil {
+		return AgentRegistryEntry{}, fmt.Errorf("save token failed")
+	}
+	if _, err := store.UpsertAuthToken(AuthTokenRecord{
+		Token: token, ClientID: clientID, Kind: "dev-short", MACAddress: entry.MACAddress,
+		IssuedAt: issuedAt.Format(time.RFC3339Nano), ExpiresAt: expiresAt.Format(time.RFC3339Nano),
 	}, true); err != nil {
 		return AgentRegistryEntry{}, fmt.Errorf("save auth token failed")
 	}

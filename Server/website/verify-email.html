@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <title>SmallTalk · Email 驗證</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="stylesheet" href="/css/login.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="brand"><div class="brandBadge">S</div><div>SmallTalk</div></div>
+      <div class="heroCopy">
+        <div class="eyebrow">安全身分驗證</div>
+        <h1>Email 臨時連結<br />與驗證碼</h1>
+        <div class="heroText">連結與驗證碼均為單次使用。註冊與 TOKEN 重發完成後，TOKEN 只會在本頁顯示一次。</div>
+      </div>
+    </section>
+    <section class="panelWrap">
+      <div class="panel">
+        <div class="panelHead"><div class="panelTitle">完成驗證</div><div class="panelSub">輸入驗證信中的 10 碼驗證碼</div></div>
+        <form class="form" id="verifyForm">
+          <div class="field"><label for="code">驗證碼</label><input id="code" maxlength="10" autocomplete="one-time-code" required /></div>
+          <button class="submitBtn" id="submitBtn" type="submit">驗證</button>
+        </form>
+        <div id="error" class="error" role="alert"></div>
+        <section id="result" hidden>
+          <p id="message"></p>
+          <div class="field" id="tokenWrap" hidden>
+            <label for="token">TOKEN（僅顯示一次，請立即保存）</label>
+            <textarea id="token" rows="6" readonly></textarea>
+            <button class="submitBtn" id="copyBtn" type="button">複製 TOKEN</button>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script src="/js/verify-email.js" defer></script>
+</body>
+</html>

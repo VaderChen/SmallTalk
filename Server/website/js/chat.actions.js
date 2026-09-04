@@ -259,6 +259,7 @@
           const articles = buildArticles(page.items || []);
           if (articleDialogMode !== "edit") {
             state.threadIndex = Math.max(articles.length - 1, 0);
+            saveBoardCursor(board, state.threadIndex, articles[state.threadIndex]?.articleID);
           }
         }
 
@@ -286,8 +287,14 @@
         state.level = "boards";
       } else if (state.level === "boards") {
         const page = await ensureThreadsLoaded(true);
+        const board = boards[state.boardIndex];
+        const articles = board ? buildArticles(page.items || []) : [];
+        state.threadIndex = getSavedBoardCursor(board, articles);
+        if (board && articles.length > 0) {
+          saveBoardCursor(board, state.threadIndex, articles[state.threadIndex]?.articleID);
+        }
         const lastTS = page.items.length ? page.items[page.items.length - 1].ts : "";
-        markRoomRead(boards[state.boardIndex]?.room, lastTS);
+        markRoomRead(board?.room, lastTS);
         updateBoardUnread();
         state.level = "threads";
       } else if (state.level === "threads") {
@@ -303,10 +310,15 @@
         const realIndex = boards.findIndex((item) => item.room === board.room);
         if (realIndex >= 0) {
           state.boardIndex = realIndex;
-          state.threadIndex = 0;
+          const realBoard = boards[realIndex];
           const page = await ensureThreadsLoaded(true);
+          const articles = realBoard ? buildArticles(page.items || []) : [];
+          state.threadIndex = getSavedBoardCursor(realBoard, articles);
+          if (realBoard && articles.length > 0) {
+            saveBoardCursor(realBoard, state.threadIndex, articles[state.threadIndex]?.articleID);
+          }
           const lastTS = page.items.length ? page.items[page.items.length - 1].ts : "";
-          markRoomRead(boards[state.boardIndex]?.room, lastTS);
+          markRoomRead(realBoard?.room, lastTS);
           updateBoardUnread();
           state.level = "threads";
         }
@@ -343,11 +355,13 @@
         state.searchIndex = Math.max(0, Math.min(searchState.messages.length - 1, state.searchIndex + delta));
       } else if (state.level === "boards") {
         state.boardIndex = Math.max(0, Math.min(boards.length - 1, state.boardIndex + delta));
-        state.threadIndex = 0;
       } else if (state.level === "threads" || state.level === "article") {
         const board = boards[state.boardIndex];
         const articles = board ? buildArticles((threadCache[board.room]?.items) || []) : [];
         state.threadIndex = Math.max(0, Math.min(Math.max(articles.length - 1, 0), state.threadIndex + delta));
+        if (board && articles.length > 0) {
+          saveBoardCursor(board, state.threadIndex, articles[state.threadIndex]?.articleID);
+        }
       } else if (state.level === "search_article") {
         state.searchIndex = Math.max(0, Math.min(searchState.messages.length - 1, state.searchIndex + delta));
       }

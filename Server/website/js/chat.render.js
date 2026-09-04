@@ -63,12 +63,14 @@
         const isPinned = isNormalBoardList && isPinnedBoard(board);
         const active = (state.level === "boards" && state.boardIndex === index) || (state.level === "search_rooms" && state.searchIndex === index);
         row.className = "boardRow" + (isPinned ? " pinnedRow" : "") + (active ? " activeRow" : "");
+        const todayCount = Number(board.today || 0);
         row.innerHTML = `
           <div class="boardCursorCol"></div>
           <div class="boardNo">${fmtReplyNo(index + 1)}</div>
           <div class="boardName" title="${escapeHTML(board.name)}">${escapeHTML(board.name)}</div>
           <div>${escapeHTML(board.category)}</div>
           <div class="boardDesc">${escapeHTML(board.description || board.room)}</div>
+          <div class="boardToday ${todayCount > 0 ? "todayActive" : ""}">${todayCount}</div>
           <div class="boardHot">${board.hot}</div>
           <div class="boardOwner">${escapeHTML(board.owner)}</div>
         `;
@@ -77,7 +79,6 @@
             state.searchIndex = index;
           } else {
             state.boardIndex = index;
-            state.threadIndex = 0;
           }
           await enterNextLevel();
         });
@@ -149,11 +150,18 @@
         `;
         row.addEventListener("click", async () => {
           state.threadIndex = index;
+          if (board) {
+            saveBoardCursor(board, index, thread.articleID);
+          }
           await enterNextLevel();
         });
         frag.appendChild(row);
       });
       threadList.replaceChildren(frag);
+      const activeEl = threadList.children[state.threadIndex];
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: "nearest" });
+      }
       _lastThreadsSource = page ? page.items : null;
       _lastThreadsLen = page && page.items ? page.items.length : 0;
     }
@@ -640,6 +648,7 @@
             <div>看板名稱</div>
             <div>類別</div>
             <div>內容敘述</div>
+            <div>今日</div>
             <div>人氣</div>
             <div>板主</div>
           `;

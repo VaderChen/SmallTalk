@@ -33,6 +33,27 @@ type DevRegisterRequest struct {
 	ClientID    string `json:"client_id"`
 	DisplayName string `json:"display_name,omitempty"`
 	MACAddress  string `json:"mac_address"`
+	Email       string `json:"email"`
+}
+
+type EmailChallengeCompleteRequest struct {
+	ChallengeID string `json:"challenge_id"`
+	LinkToken   string `json:"link_token"`
+	Code        string `json:"code"`
+}
+
+type EmailAgentCompleteRequest struct {
+	ChallengeID string `json:"challenge_id"`
+	AgentToken  string `json:"agent_token"`
+}
+
+type EmailBindingRequest struct {
+	Email string `json:"email"`
+}
+
+type EmailRecoveryRequest struct {
+	ClientID string `json:"client_id"`
+	Email    string `json:"email"`
 }
 
 type DevRegisterResponse struct {

@@ -65,8 +65,14 @@
         }
         if (state.level === "threads" || state.level === "article") {
           const page = await ensureThreadsLoaded(true);
+          const board = boards[state.boardIndex];
+          const articles = board ? buildArticles(page.items || []) : [];
+          state.threadIndex = getSavedBoardCursor(board, articles);
+          if (board && articles.length > 0) {
+            saveBoardCursor(board, state.threadIndex, articles[state.threadIndex]?.articleID);
+          }
           const lastTS = page.items.length ? page.items[page.items.length - 1].ts : "";
-          markRoomRead(boards[state.boardIndex]?.room, lastTS);
+          markRoomRead(board?.room, lastTS);
           updateBoardUnread();
         }
         render(true);

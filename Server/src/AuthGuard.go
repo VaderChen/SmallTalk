@@ -18,6 +18,7 @@ type requestAuthContext struct {
 	TokenKind     string
 	ClientID      string
 	SourceIP      string
+	AuthExpiresAt string
 	JWT           *MarsJSON.JSONObject
 }
 
@@ -95,6 +96,7 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 						TokenKind:     strings.TrimSpace(record.Kind),
 						ClientID:      strings.TrimSpace(record.ClientID),
 						SourceIP:      sourceIP,
+						AuthExpiresAt: strings.TrimSpace(record.ExpiresAt),
 					}, true
 				}
 				principalType := "agent"
@@ -110,6 +112,7 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 					TokenKind:     strings.TrimSpace(record.Kind),
 					ClientID:      strings.TrimSpace(record.ClientID),
 					SourceIP:      sourceIP,
+					AuthExpiresAt: strings.TrimSpace(record.ExpiresAt),
 				}, true
 			}
 		}

@@ -77,6 +77,39 @@ func RunService() {
 		Tools.Log.Print(Tools.LL_Error, "invalid security configuration: %v", err)
 		return
 	}
+	var emailManager *EmailManager
+	emailKey, emailPepper, emailSecretErr := LoadOrCreateEmailSecrets(dataDir)
+	if emailSecretErr != nil {
+		Tools.Log.Print(Tools.LL_Error, "email verification secret initialization failed: %v", emailSecretErr)
+		return
+	}
+	publicBaseURL := service.Property.OptString("email_public_base_url", "https://bbs.mars-cloud.com")
+	dailyRegistrationLimit := service.Property.OptInt("email_daily_registration_limit", defaultDailyRegistrationLimit)
+	resendAPIKeyEnv := strings.TrimSpace(service.Property.OptString("resend_api_key_env", "RESEND_API_KEY"))
+	resendAPIKey := ""
+	if resendAPIKeyEnv != "" {
+		resendAPIKey = strings.TrimSpace(os.Getenv(resendAPIKeyEnv))
+	}
+	resendFrom := strings.TrimSpace(service.Property.OptString("email_from", ""))
+	if resendFrom == "" {
+		resendFrom = strings.TrimSpace(os.Getenv("SMALLTALK_EMAIL_FROM"))
+	}
+	var emailSender EmailSender
+	if resendAPIKey != "" && resendFrom != "" {
+		emailSender = &ResendEmailSender{APIKey: resendAPIKey, From: resendFrom}
+	}
+	emailManager, storeErr = NewEmailManager(store, dataDir, publicBaseURL, emailKey, emailPepper, emailSender)
+	if storeErr != nil {
+		Tools.Log.Print(Tools.LL_Error, "email verification initialization failed: %v", storeErr)
+		return
+	}
+	if err := emailManager.SetDailyRegistrationLimit(dailyRegistrationLimit); err != nil {
+		Tools.Log.Print(Tools.LL_Error, "invalid Email registration configuration: %v", err)
+		return
+	}
+	if !emailManager.Available() {
+		Tools.Log.Print(Tools.LL_Info, "Email verification is configured but delivery is disabled until environment variable %q and email_from are set", resendAPIKeyEnv)
+	}
 	store.SetDefaultAdminPassword(defaultPassword)
 	ensureDefaultLobby(store)
 	if stop := StartRoomSnapshotter(store, boardsExportDir, time.Duration(boardsExportIntervalSec)*time.Second); stop != nil {
@@ -91,8 +124,13 @@ func RunService() {
 			cloud.stopWorkers = append(cloud.stopWorkers, stop)
 		}
 	}
-	if stop := StartAutoApprovalWorker(store); stop != nil {
-		cloud.stopWorkers = append(cloud.stopWorkers, stop)
+	// 新帳號改由 Email challenge 成功後即時核准與核發 TOKEN；停用舊的
+	// 定時自動核准 worker，既有帳號與已核發 TOKEN 不受影響。
+	if store.AutoApprovalEnabled() {
+		if err := store.SetAutoApprovalEnabled(false); err != nil {
+			Tools.Log.Print(Tools.LL_Error, "disable legacy auto approval failed: %v", err)
+			return
+		}
 	}
 	metricsCollector := StartSystemMetricsCollector(dataDir)
 	cloud.stopWorkers = append(cloud.stopWorkers, func() {
@@ -106,9 +144,10 @@ func RunService() {
 		WebEntryPath:    webEntryPath,
 		MarsClient:      service.MarsClient,
 		Store:           store,
+		Email:           emailManager,
 	}
 
-	facade := &SmallTalkFacade{Store: store}
+	facade := &SmallTalkFacade{Store: store, Email: emailManager}
 	mcpHandler := NewMCPHTTPHandler(facade)
 	service.AddRestfulAPI("/mcp", &mcpRestfulCallback{handler: mcpHandler})
 	service.AddRestfulAPI("/auth", authAPI)
@@ -119,7 +158,7 @@ func RunService() {
 		service.HttpService.SetDefaultCacheControl("public, max-age=300")
 	}
 	service.RegistryServerInfo(GetVersionTag(), "pack", true)
-	cloud.MCPListeners = startMCPListeners(store, mcpHTTPPort, mcpHTTPSPort, service.Property.OptString("ssl_key", ""), service.Property.OptString("ssl_key_file", ""))
+	cloud.MCPListeners = startMCPListeners(store, mcpHTTPPort, mcpHTTPSPort, service.Property.OptString("ssl_key", ""), service.Property.OptString("ssl_key_file", ""), emailManager)
 	service.Start()
 	shutdown := make(chan struct{})
 	var shutdownOnce sync.Once
@@ -270,13 +309,17 @@ func samePath(a, b string) bool {
 	return a == b
 }
 
-func startMCPListeners(store *Store, httpPort, httpsPort int, certFile, keyFile string) *MCPListenerSet {
+func startMCPListeners(store *Store, httpPort, httpsPort int, certFile, keyFile string, emailManagers ...*EmailManager) *MCPListenerSet {
 	listeners := &MCPListenerSet{}
 	if httpPort <= 0 && httpsPort <= 0 {
 		Tools.Log.Print(Tools.LL_Info, "MCP endpoint disabled")
 		return listeners
 	}
-	handler := NewMCPHTTPHandler(&SmallTalkFacade{Store: store})
+	var emailManager *EmailManager
+	if len(emailManagers) > 0 {
+		emailManager = emailManagers[0]
+	}
+	handler := NewMCPHTTPHandler(&SmallTalkFacade{Store: store, Email: emailManager})
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", handler)
 	mux.Handle("/mcp/", handler)

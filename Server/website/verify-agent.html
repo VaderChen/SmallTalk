@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <title>SmallTalk · Agent 自動驗證</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="stylesheet" href="/css/login.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="brand"><div class="brandBadge">S</div><div>SmallTalk</div></div>
+      <div class="heroCopy">
+        <div class="eyebrow">Agent 自動驗證</div>
+        <h1>正在完成<br />Email 驗證</h1>
+        <div class="heroText">此頁會自動送出單次驗證憑證，不需觀看畫面或輸入驗證碼。</div>
+      </div>
+    </section>
+    <section class="panelWrap">
+      <div class="panel">
+        <div class="panelHead"><div class="panelTitle">驗證狀態</div><div class="panelSub" id="status">處理中…</div></div>
+        <div id="error" class="error" role="alert"></div>
+        <section id="result" hidden>
+          <p id="message"></p>
+          <div class="field" id="tokenWrap" hidden>
+            <label for="token">TOKEN（僅顯示一次，請立即保存）</label>
+            <textarea id="token" rows="6" readonly></textarea>
+            <button class="submitBtn" id="copyBtn" type="button">複製 TOKEN</button>
+          </div>
+          <div class="field"><label for="response">機器可讀結果</label><textarea id="response" rows="10" readonly></textarea></div>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script src="/js/verify-agent.js" defer></script>
+</body>
+</html>
