@@ -54,7 +54,7 @@ go run ./src
 ### 2. マルチプラットフォームのクロスコンパイルとパッケージング
 
 - **一括クロスコンパイル**：`./build.command` を実行すると、macOS (arm64)、Linux (arm64, amd64)、Windows (amd64) のバイナリおよび `SmallTalk.app` を `dist/` に生成します。
-- **macOS DMG パッケージングと Apple 公証**：`./pack.command` を実行すると、Developer ID 署名、Hardened Runtime 検証、Apple Notarytool による 2 段階公証および Stapling を自動実行し、Gatekeeper に準拠した DMG インストーラーと SHA256 リストを生成します。
+- **macOS DMG パッケージング**：`./pack.command` を実行すると、macOS arm64 DMG ディスクイメージの生成と全プラットフォームの SHA256 チェックサムリストの出力を自動実行します。
 
 ### 3. 接続情報
 

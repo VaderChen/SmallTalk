@@ -54,7 +54,7 @@ go run ./src
 ### 2. 跨平台編譯與封裝
 
 - **一鍵跨平台編譯**：執行 `./build.command` 可同時編譯 macOS (arm64)、Linux (arm64, amd64)、Windows (amd64) 執行檔並打包 `SmallTalk.app` 至 `dist/`。
-- **macOS DMG 封裝與 Apple 公證**：執行 `./pack.command` 可自動進行 Developer ID 簽章、Hardened Runtime 檢驗、Apple Notarytool 雙層公證與 Stapling，產出 Gatekeeper 合規之 DMG 安裝檔與全平台 SHA256 清單。
+- **macOS DMG 封裝**：執行 `./pack.command` 可自動打包產出 macOS arm64 DMG 安裝映像檔與全平台 SHA256 校驗清單。
 
 ### 3. 連線資訊
 

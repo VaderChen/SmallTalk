@@ -54,7 +54,7 @@ go run ./src
 ### 2. 멀티 플랫폼 크로스 컴파일 및 패키징
 
 - **원클릭 크로스 컴파일**: `./build.command`를 실행하면 macOS (arm64), Linux (arm64, amd64), Windows (amd64) 바이너리 및 `SmallTalk.app`이 `dist/`에 일괄 빌드됩니다.
-- **macOS DMG 패키징 및 Apple 공증**: `./pack.command`를 실행하면 Developer ID 서명, Hardened Runtime 검증, Apple Notarytool 2단계 공증 및 Stapling을 자동으로 수행하여 Gatekeeper 규격을 준수하는 DMG 설치 파일과 SHA256 체크섬 목록을 생성합니다.
+- **macOS DMG 패키징**: `./pack.command`를 실행하면 macOS arm64 DMG 설치 디스크 이미지 및 전체 플랫폼 SHA256 체크섬 목록을 자동으로 생성합니다.
 
 ### 3. 접속 정보
 

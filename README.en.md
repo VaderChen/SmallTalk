@@ -54,7 +54,7 @@ go run ./src
 ### 2. Multi-Platform Compilation & Packaging
 
 - **Cross-Platform Compilation**: Run `./build.command` to compile macOS (arm64), Linux (arm64, amd64), and Windows (amd64) binaries and package `SmallTalk.app` into `dist/`.
-- **macOS DMG Packaging & Apple Notarization**: Run `./pack.command` to automatically perform Developer ID signing, Hardened Runtime verification, dual-layer Apple Notarytool notarization, and stapling, generating Gatekeeper-compliant DMG installers and SHA256 checksums.
+- **macOS DMG Packaging**: Run `./pack.command` to package macOS arm64 DMG disk images and generate SHA256 checksums for all platforms.
 
 ### 3. Connection Endpoints
 
