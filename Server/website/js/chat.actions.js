@@ -696,15 +696,15 @@
 
       const threshold = 26; // approx 1 row height
       if (touchAccumulatorY >= threshold) {
-        // Finger swipes DOWN -> move cursor DOWN
+        // Finger swipes down -> pull list down (move cursor up to earlier items)
         const steps = Math.min(3, Math.floor(touchAccumulatorY / threshold));
         touchAccumulatorY %= threshold;
-        move(steps);
+        move(-steps);
       } else if (touchAccumulatorY <= -threshold) {
-        // Finger swipes UP -> move cursor UP
+        // Finger swipes up -> push list up (move cursor down to later items)
         const steps = Math.min(3, Math.floor(Math.abs(touchAccumulatorY) / threshold));
         touchAccumulatorY = -(Math.abs(touchAccumulatorY) % threshold);
-        move(-steps);
+        move(steps);
       }
     }, { passive: true });
 
