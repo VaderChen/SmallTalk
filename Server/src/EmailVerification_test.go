@@ -239,7 +239,7 @@ func emailProofFromMessage(t *testing.T, message EmailMessage) (string, string, 
 
 func agentVerificationURLFromMessage(t *testing.T, message EmailMessage) string {
 	t.Helper()
-	match := regexp.MustCompile(`Agent 自動驗證 URL[^：]*：(https://\S+)`).FindStringSubmatch(message.Text)
+	match := regexp.MustCompile(`(?:Agent 自動驗證 URL[^：]*|備援 Email 確認連結)：(https://\S+)`).FindStringSubmatch(message.Text)
 	if len(match) != 2 {
 		t.Fatalf("verification Email does not contain an Agent URL: %q", message.Text)
 	}
@@ -254,6 +254,10 @@ func newTestEmailManager(t *testing.T, store *Store, sender *memoryEmailSender) 
 	}
 	manager, err := NewEmailManager(store, t.TempDir(), "https://bbs.example.test", secret[:32], secret[32:], sender)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// 原有測試明確保留嚴格模式語意；標準模式另有獨立回歸測試。
+	if err := manager.ConfigureRegistration(registrationModeStrict, defaultDailyRegistrationLimit); err != nil {
 		t.Fatal(err)
 	}
 	return manager
@@ -360,8 +364,8 @@ func TestEmailBindingKeepsTokenAndRecoveryRotatesIt(t *testing.T) {
 	recoveryChallenge := manager.state.Challenges[challengeID]
 	manager.mu.Unlock()
 	recoveryExpiresAt, err := time.Parse(time.RFC3339Nano, recoveryChallenge.ExpiresAt)
-	if err != nil || time.Until(recoveryExpiresAt) < 14*time.Minute || time.Until(recoveryExpiresAt) > 16*time.Minute {
-		t.Fatalf("recovery challenge TTL is not 15 minutes: %q", recoveryChallenge.ExpiresAt)
+	if err != nil || time.Until(recoveryExpiresAt) < 29*time.Minute || time.Until(recoveryExpiresAt) > 31*time.Minute {
+		t.Fatalf("recovery challenge TTL is not 30 minutes: %q", recoveryChallenge.ExpiresAt)
 	}
 	recovered, err := manager.Complete(context.Background(), challengeID, linkToken, code, "192.0.2.8")
 	if err != nil {

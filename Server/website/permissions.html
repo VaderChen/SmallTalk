@@ -6,7 +6,7 @@
   <title>SmallTalk · 管理頁面</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="/css/permissions.css?v=build1585" />
+  <link rel="stylesheet" href="/css/permissions.css?v=20260905-account-sort-align" />
 </head>
 <body>
   <header>
@@ -153,7 +153,16 @@
           <button id="tabReadOnly" class="tabButton" type="button">已唯讀 <span class="tabBadge" id="badgeReadOnly">0</span></button>
         </div>
 
-        <div class="autoApprovalControls" title="舊式自動核發已停用；新帳號需完成 Email 驗證">
+        <div class="registrySortControl field">
+          <label for="registrySort">排序</label>
+          <select id="registrySort" aria-label="帳號排序方式">
+            <option value="created-desc">建立時間：新 → 舊</option>
+            <option value="created-asc">建立時間：舊 → 新</option>
+            <option value="name-asc">名稱：升冪</option>
+            <option value="name-desc">名稱：降冪</option>
+          </select>
+        </div>
+        <div class="autoApprovalControls" title="舊式定時自動核發已停用；請於系統設定選擇註冊模式">
           <div class="intervalInputWrap">
             <span class="intervalPrefix">每</span>
             <input id="autoApprovalIntervalInput" type="number" min="1" max="1440" value="1" aria-label="自動核准間隔（分鐘）" disabled />
@@ -163,7 +172,7 @@
           <label class="switch" for="autoApprovalSwitch">
             <input id="autoApprovalSwitch" type="checkbox" aria-label="自動核發金鑰" disabled>
             <span class="switchTrack" aria-hidden="true"><span class="switchThumb"></span></span>
-            <span id="autoApprovalState" class="switchState">Email 驗證核發</span>
+            <span id="autoApprovalState" class="switchState">依註冊模式核發</span>
           </label>
           <span id="autoApprovalIntervalDisplay" style="display:none;">1</span>
         </div>
@@ -364,6 +373,53 @@
 
   <!-- 4. 系統設定 Panel -->
   <div id="panel-settings" class="featurePanel" style="display:none;">
+    <section class="card" style="margin-bottom:18px;">
+      <div class="cardHead"><div>
+        <div class="cardTitle">帳號註冊認證模式</div>
+        <div class="subText">設定儲存後立即生效並永久保存；不會撤銷既有 TOKEN，已寄出的驗證連結仍依申請當時流程完成。</div>
+      </div></div>
+      <div class="settingsBody registrationSettingsBody">
+        <div class="settingItem">
+          <div class="settingInfo">
+            <label class="settingTitle" for="registrationMode">認證模式</label>
+            <div class="settingDesc" id="registrationModeHelp">標準模式立即核發 TOKEN，確認 Email 後才啟用復原；嚴格模式先驗證 Email 再建立帳號。通知信不含完整 TOKEN，每個 Email 最多對應 5 個帳號。</div>
+          </div>
+          <div class="field settingSelectControl">
+            <select id="registrationMode" aria-describedby="registrationModeHelp" disabled>
+              <option value="standard">標準模式（預設）</option>
+              <option value="strict">嚴格模式</option>
+            </select>
+          </div>
+        </div>
+        <div class="settingItem">
+          <div class="settingInfo">
+            <label class="settingTitle" for="registrationDailyLimit">每日新帳號申請上限</label>
+            <div class="settingDesc">僅計新帳號申請，不等於寄信封數；綁定與復原仍會使用寄信資源。儲存時一併套用上方認證模式。</div>
+          </div>
+          <div class="intervalInputWrap settingQuotaControl">
+            <span class="intervalPrefix">每日</span>
+            <input id="registrationDailyLimit" type="number" min="1" step="1" disabled aria-label="每日新帳號申請上限" />
+            <span class="intervalUnit">份</span>
+            <button id="saveRegistrationSettings" type="button" class="btnSaveInterval" disabled>儲存註冊設定</button>
+          </div>
+          <div id="registrationSettingsMessage" class="message settingFeedback" role="status" style="display:none;"></div>
+        </div>
+        <div class="settingItem">
+          <div class="settingInfo">
+            <label class="settingTitle" for="emailDailySendLimit">Resend 每日寄信上限</label>
+            <div class="settingDesc">站台端上限預設 100，0 代表暫停寄信。包含驗證、綁定、復原、完成通知、失敗及重試；每日依站台時區重算，重啟不歸零，不會更動 Resend 帳戶方案。</div>
+          </div>
+          <div class="intervalInputWrap settingQuotaControl">
+            <span class="intervalPrefix">每日</span>
+            <input id="emailDailySendLimit" type="number" min="0" step="1" disabled aria-label="Resend 每日寄信上限" />
+            <span class="intervalUnit">封</span>
+            <button id="saveEmailDeliverySettings" type="button" class="btnSaveInterval" disabled>儲存寄信上限</button>
+          </div>
+          <div id="emailDeliverySettingsMessage" class="message settingFeedback" role="status">尚未載入寄信額度</div>
+        </div>
+        <div class="settingDesc settingFootnote">連結有效期限：新註冊確認 24 小時、既有帳號綁定 12 小時、TOKEN 復原 30 分鐘。</div>
+      </div>
+    </section>
     <section class="card">
       <div class="cardHead">
         <div>
@@ -670,6 +726,6 @@
     </div>
   </dialog>
 
-  <script src="/js/permissions.js?v=build1585" defer></script>
+  <script src="/js/permissions.js?v=20260905-account-sort" defer></script>
 </body>
 </html>

@@ -23,6 +23,10 @@ Server/website/uploads/
 Server/src/website/images/
 Server/src/website/uploads/
 
+# Local operational references and deploy packages (never versioned)
+BBS_AGENT_CREDENTIALS.md
+Server/deploy-artifacts/
+
 # Legacy version-control metadata
 .svn/
 

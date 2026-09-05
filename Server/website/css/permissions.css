@@ -226,6 +226,48 @@
       color: var(--muted);
       line-height: 1.6;
     }
+    .registrationSettingsBody .settingInfo {
+      flex: 1 1 360px;
+      max-width: 680px;
+      min-width: 0;
+    }
+    .registrationSettingsBody .settingTitle {
+      display: block;
+    }
+    .registrationSettingsBody .settingSelectControl {
+      flex: 0 1 280px;
+      width: 280px;
+      margin: 0 0 0 auto;
+    }
+    .registrationSettingsBody .settingQuotaControl {
+      margin-left: auto;
+      background: rgba(15, 23, 42, 0.03);
+      border-radius: 999px;
+      padding: 4px 10px;
+    }
+    .registrationSettingsBody [role="status"] {
+      flex: 1 0 100%;
+      margin: 0;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .registrationSettingsBody .settingFootnote {
+      padding-top: 14px;
+    }
+    @media (max-width: 640px) {
+      .registrationSettingsBody .settingInfo,
+      .registrationSettingsBody .settingSelectControl {
+        flex-basis: 100%;
+        width: 100%;
+      }
+      .registrationSettingsBody .settingQuotaControl {
+        margin-left: 0;
+        max-width: 100%;
+        flex-wrap: wrap;
+        border-radius: 14px;
+      }
+    }
     .settingBadge {
       background: rgba(91, 78, 231, 0.08);
       color: var(--accent);
@@ -753,6 +795,16 @@
     .message.error { color: var(--danger); }
     .message.success { color: var(--success); }
 
+    .tabsHeader .registrySortControl {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 8px auto;
+      flex: 0 1 248px;
+    }
+    .registrySortControl label { margin: 0; white-space: nowrap; }
+    .registrySortControl select { min-width: 180px; }
     .tabsHeader {
       display: flex;
       align-items: center;
@@ -1284,4 +1336,3 @@
         grid-template-columns: minmax(0, 1fr) 84px 84px;
       }
     }
-  

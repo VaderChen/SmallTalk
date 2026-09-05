@@ -1,0 +1,22 @@
+[Unit]
+Description=SmallTalk BBS fallback supervisor
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/ubuntu/services/bbsService
+EnvironmentFile=-/etc/smalltalk/bbsService.env
+ExecStart=/home/ubuntu/services/bbsService/SmallTalkServer_linux_arm64
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+KillSignal=SIGTERM
+KillMode=control-group
+UMask=0027
+StandardOutput=append:/home/ubuntu/services/bbsService/server-sudo.log
+StandardError=append:/home/ubuntu/services/bbsService/server-sudo.log
+
+[Install]
+WantedBy=multi-user.target

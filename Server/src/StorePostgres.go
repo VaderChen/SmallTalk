@@ -189,6 +189,11 @@ func (pg *PostgresStore) initSystemSchema() error {
 	if err != nil {
 		return err
 	}
+	// NULL 只用於辨識舊資料，遷移後明確保存 true/false，避免撤權後被舊 JSON 還原。
+	if _, err := pg.db.Exec(`ALTER TABLE agent_registry ADD COLUMN IF NOT EXISTS is_admin BOOLEAN;
+	ALTER TABLE agent_registry ADD COLUMN IF NOT EXISTS is_admin_at TEXT;`); err != nil {
+		return fmt.Errorf("初始化管理角色欄位: %w", err)
+	}
 	_, _ = pg.db.Exec(`ALTER TABLE agent_registry ADD COLUMN IF NOT EXISTS read_only BOOLEAN DEFAULT FALSE;`)
 	_, _ = pg.db.Exec(`ALTER TABLE agent_registry ADD COLUMN IF NOT EXISTS read_only_at TEXT;`)
 	_, _ = pg.db.Exec(`ALTER TABLE presence ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ DEFAULT NOW();`)
@@ -551,11 +556,11 @@ func (pg *PostgresStore) SaveAgentRegistryEntry(entry *AgentRegistryEntry) error
 	INSERT INTO agent_registry (
 		client_id, display_name, mac_address, approved, approved_at,
 		blocked, blocked_at, token_issued, token_issued_at, token_expires_at,
-		token, registered_at, last_seen_at, read_only, read_only_at, meta
+		token, registered_at, last_seen_at, read_only, read_only_at, meta, is_admin, is_admin_at
 	) VALUES (
 		$1, $2, $3, $4, $5,
 		$6, $7, $8, $9, $10,
-		$11, $12, $13, $14, $15, $16
+		$11, $12, $13, $14, $15, $16, $17, $18
 	) ON CONFLICT (client_id) DO UPDATE
 	SET display_name = EXCLUDED.display_name,
 	    mac_address = EXCLUDED.mac_address,
@@ -571,13 +576,15 @@ func (pg *PostgresStore) SaveAgentRegistryEntry(entry *AgentRegistryEntry) error
 	    last_seen_at = EXCLUDED.last_seen_at,
 	    read_only = EXCLUDED.read_only,
 	    read_only_at = EXCLUDED.read_only_at,
-	    meta = EXCLUDED.meta;
+	    meta = EXCLUDED.meta,
+	    is_admin = EXCLUDED.is_admin,
+	    is_admin_at = EXCLUDED.is_admin_at;
 	`
 
 	_, err := pg.db.Exec(query,
 		entry.ClientID, entry.DisplayName, entry.MACAddress, entry.Approved, entry.ApprovedAt,
 		entry.Blocked, entry.BlockedAt, entry.TokenIssued, entry.TokenIssuedAt, entry.TokenExpiresAt,
-		entry.Token, entry.RegisteredAt, entry.LastSeenAt, entry.ReadOnly, entry.ReadOnlyAt, metaJSON,
+		entry.Token, entry.RegisteredAt, entry.LastSeenAt, entry.ReadOnly, entry.ReadOnlyAt, metaJSON, entry.IsAdmin, entry.IsAdminAt,
 	)
 	return err
 }
@@ -586,7 +593,7 @@ func (pg *PostgresStore) LoadAllAgentRegistry() (map[string]*AgentRegistryEntry,
 	query := `
 	SELECT client_id, display_name, mac_address, approved, approved_at,
 	       blocked, blocked_at, token_issued, token_issued_at, token_expires_at,
-	       token, registered_at, last_seen_at, read_only, read_only_at, meta
+	       token, registered_at, last_seen_at, read_only, read_only_at, meta, is_admin, is_admin_at
 	FROM agent_registry;
 	`
 	rows, err := pg.db.Query(query)
@@ -598,15 +605,20 @@ func (pg *PostgresStore) LoadAllAgentRegistry() (map[string]*AgentRegistryEntry,
 	out := make(map[string]*AgentRegistryEntry)
 	for rows.Next() {
 		var e AgentRegistryEntry
+		var admin sql.NullBool
+		var adminAt sql.NullString
 		var metaBytes []byte
 		var disp, mac, appAt, blkAt, tokIssAt, tokExpAt, tok, regAt, lastSeen, roAt sql.NullString
 		if err := rows.Scan(
 			&e.ClientID, &disp, &mac, &e.Approved, &appAt,
 			&e.Blocked, &blkAt, &e.TokenIssued, &tokIssAt, &tokExpAt,
-			&tok, &regAt, &lastSeen, &e.ReadOnly, &roAt, &metaBytes,
+			&tok, &regAt, &lastSeen, &e.ReadOnly, &roAt, &metaBytes, &admin, &adminAt,
 		); err != nil {
 			return nil, err
 		}
+		e.IsAdmin = admin.Bool
+		e.IsAdminAt = adminAt.String
+		e.postgresRoleLoaded = admin.Valid
 		e.DisplayName = disp.String
 		e.MACAddress = mac.String
 		e.ApprovedAt = appAt.String
@@ -880,4 +892,43 @@ func (pg *PostgresStore) CountTodayMessages(todayStart time.Time) int {
 		}
 	}
 	return total
+}
+
+// 首次遷移只寫角色欄位；若已有明確值，保留資料庫現值（包含 false 撤權）。
+func (pg *PostgresStore) migrateAgentRegistryRole(entry *AgentRegistryEntry) error {
+	var adminAt sql.NullString
+	err := pg.db.QueryRow(`UPDATE agent_registry
+	SET is_admin = COALESCE(is_admin, $2),
+	    is_admin_at = CASE WHEN is_admin IS NULL THEN $3 ELSE is_admin_at END
+	WHERE client_id = $1 RETURNING is_admin, is_admin_at`,
+		entry.ClientID, entry.IsAdmin, entry.IsAdminAt).Scan(&entry.IsAdmin, &adminAt)
+	if err == nil {
+		entry.IsAdminAt = adminAt.String
+	}
+	return err
+}
+
+func (pg *PostgresStore) saveAgentRole(clientID string, isAdmin bool, adminAt string, changes []boardRoleChange) error {
+	tx, err := pg.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`UPDATE agent_registry SET is_admin=$2,is_admin_at=$3 WHERE client_id=$1`, clientID, isAdmin, adminAt)
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		return fmt.Errorf("管理角色目標不存在或更新失敗: %v", err)
+	}
+	for _, change := range changes {
+		result, err = tx.Exec(`UPDATE boards SET owner=$3,updated_at=NOW() WHERE project_id=$1 AND room_id=$2`, change.projectID, change.room.ID, change.owner)
+		if err != nil {
+			return err
+		}
+		if count, err := result.RowsAffected(); err != nil || count != 1 {
+			return fmt.Errorf("版主設定目標不存在或更新失敗: %v", err)
+		}
+	}
+	return tx.Commit()
 }

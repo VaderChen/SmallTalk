@@ -29,6 +29,8 @@ type AgentRegistryEntry struct {
 	IsAdmin        bool           `json:"is_admin"`
 	IsAdminAt      string         `json:"is_admin_at,omitempty"`
 	Meta           map[string]any `json:"meta,omitempty"`
+
+	postgresRoleLoaded bool // 區分舊資料未遷移與已明確撤銷管理角色。
 }
 
 type AgentRegistryUpsert struct {
@@ -438,6 +440,13 @@ func (s *Store) GetAgentRole(clientID string) (bool, []string, error) {
 	return isAdmin, modRooms, nil
 }
 
+type boardRoleChange struct {
+	projectID     string
+	room          *Room
+	previousOwner string
+	owner         string
+}
+
 func (s *Store) SetAgentRole(clientID string, isAdmin bool, moderatorRooms []string) error {
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" {
@@ -449,52 +458,85 @@ func (s *Store) SetAgentRole(clientID string, isAdmin bool, moderatorRooms []str
 		s.mu.Unlock()
 		return fmt.Errorf("agent not found")
 	}
-	entry.IsAdmin = isAdmin
-	if isAdmin {
-		entry.IsAdminAt = time.Now().Format(time.RFC3339Nano)
-	} else {
-		entry.IsAdminAt = ""
-	}
 	displayName := strings.TrimSpace(entry.DisplayName)
-	s.mu.Unlock()
-
-	if err := s.SaveRegistry(); err != nil {
-		return err
-	}
-
 	targetSet := make(map[string]bool)
-	for _, roomKey := range moderatorRooms {
-		targetSet[strings.TrimSpace(roomKey)] = true
+	for _, key := range moderatorRooms {
+		targetSet[strings.TrimSpace(key)] = true
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	changes := []boardRoleChange{}
 	for pid, p := range s.projects {
 		if p == nil {
 			continue
 		}
 		for rid, r := range p.Rooms {
-			if r == nil {
+			if r == nil || strings.EqualFold(rid, "announce") || strings.EqualFold(rid, "visitors") {
 				continue
 			}
-			if strings.EqualFold(rid, "announce") || strings.EqualFold(rid, "visitors") {
-				continue
+			owner := strings.TrimSpace(r.Owner)
+			isOwner := owner == clientID || (displayName != "" && owner == displayName)
+			next := r.Owner
+			if targetSet[pid+"/"+rid] || targetSet[rid] {
+				// 舊名稱指派也正規化為不受更名影響的 client_id。
+				next = clientID
+			} else if isOwner {
+				next = ""
 			}
-			fullKey := fmt.Sprintf("%s/%s", pid, rid)
-			isTarget := targetSet[fullKey] || targetSet[rid]
-			currentOwner := strings.TrimSpace(r.Owner)
-			isCurrentlyOwner := (currentOwner == clientID || (displayName != "" && currentOwner == displayName))
-
-			if isTarget && !isCurrentlyOwner {
-				r.Owner = clientID
-				_ = s.saveRoomMetaLocked(pid, r)
-			} else if !isTarget && isCurrentlyOwner {
-				r.Owner = ""
-				_ = s.saveRoomMetaLocked(pid, r)
+			if next != r.Owner {
+				changes = append(changes, boardRoleChange{pid, r, r.Owner, next})
 			}
 		}
 	}
-
+	sort.Slice(changes, func(i, j int) bool {
+		return changes[i].projectID+"/"+changes[i].room.ID < changes[j].projectID+"/"+changes[j].room.ID
+	})
+	adminAt := ""
+	if isAdmin {
+		adminAt = time.Now().Format(time.RFC3339Nano)
+	}
+	if s.pg != nil {
+		// 管理角色與全部版主指派同一交易，失敗不改記憶體、不回報假成功。
+		if err := s.pg.saveAgentRole(clientID, isAdmin, adminAt, changes); err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		entry.IsAdmin, entry.IsAdminAt, entry.postgresRoleLoaded = isAdmin, adminAt, true
+		for _, change := range changes {
+			change.room.Owner = change.owner
+		}
+		s.mu.Unlock()
+		return nil
+	}
+	// 本地檔案依序保存；失敗回報且回復已修改的看板。
+	for i, change := range changes {
+		change.room.Owner = change.owner
+		if err := s.saveRoomMetaLocked(change.projectID, change.room); err != nil {
+			change.room.Owner = change.previousOwner
+			for j := i - 1; j >= 0; j-- {
+				previous := changes[j]
+				previous.room.Owner = previous.previousOwner
+				if restoreErr := s.saveRoomMetaLocked(previous.projectID, previous.room); restoreErr != nil {
+					err = fmt.Errorf("%w; 回復版主設定: %v", err, restoreErr)
+				}
+			}
+			s.mu.Unlock()
+			return err
+		}
+	}
+	oldAdmin, oldAt := entry.IsAdmin, entry.IsAdminAt
+	entry.IsAdmin, entry.IsAdminAt = isAdmin, adminAt
+	s.mu.Unlock()
+	if err := s.SaveRegistry(); err != nil {
+		s.mu.Lock()
+		entry.IsAdmin, entry.IsAdminAt = oldAdmin, oldAt
+		for _, change := range changes {
+			change.room.Owner = change.previousOwner
+			if restoreErr := s.saveRoomMetaLocked(change.projectID, change.room); restoreErr != nil {
+				err = fmt.Errorf("%w; 回復版主設定: %v", err, restoreErr)
+			}
+		}
+		s.mu.Unlock()
+		return err
+	}
 	return nil
 }
 
@@ -507,28 +549,28 @@ func (s *Store) IsAgentReadOnly(clientID string) bool {
 		return false
 	}
 
-	s.mu.RLock()
+	s.mu.Lock()
 	entry, ok := s.agentRegistry[clientID]
 	if !ok || entry == nil {
-		s.mu.RUnlock()
+		s.mu.Unlock()
 		return false
 	}
 	if entry.ReadOnly {
-		s.mu.RUnlock()
+		s.mu.Unlock()
 		return true
 	}
 	if entry.LastSeenAt != "" {
 		if t, err := time.Parse(time.RFC3339Nano, entry.LastSeenAt); err == nil && !t.IsZero() {
 			if time.Since(t) >= InactiveThresholdForReadOnly {
-				s.mu.RUnlock()
-				go func() {
-					_, _ = s.SetAgentReadOnly(clientID, true, time.Now())
-				}()
+				entry.ReadOnly = true
+				entry.ReadOnlyAt = time.Now().Format(time.RFC3339Nano)
+				s.mu.Unlock()
+				_ = s.SaveRegistry()
 				return true
 			}
 		}
 	}
-	s.mu.RUnlock()
+	s.mu.Unlock()
 	return false
 }
 

@@ -16,6 +16,7 @@ import (
 // PermissionsAPI exposes the root-only HTTP API used by the permissions page.
 type PermissionsAPI struct {
 	Store *Store
+	Email *EmailManager
 }
 
 func requireHTTPRoot(r *http.Request, jwt *MarsJSON.JSONObject, store *Store) error {
@@ -65,6 +66,48 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 	}
 
 	parts := splitPathFromBase(r.URL.Path, "/permissions")
+	if len(parts) == 1 && parts[0] == "email-delivery-settings" {
+		if api.Email == nil {
+			return mustJSON(ErrorResponse{Error: "email manager unavailable"})
+		}
+		switch r.Method {
+		case http.MethodGet:
+			return mustJSON(api.Email.EmailDeliverySettings())
+		case http.MethodPost:
+			var settings struct {
+				Limit *int `json:"daily_send_limit"`
+			}
+			if err := json.Unmarshal([]byte(body), &settings); err != nil || settings.Limit == nil {
+				return mustJSON(ErrorResponse{Error: "daily_send_limit is required"})
+			}
+			if err := api.Email.UpdateEmailLimit(*settings.Limit); err != nil {
+				return mustJSON(ErrorResponse{Error: err.Error()})
+			}
+			return mustJSON(api.Email.EmailDeliverySettings())
+		default:
+			return mustJSON(ErrorResponse{Error: "method not allowed"})
+		}
+	}
+	if len(parts) == 1 && parts[0] == "registration-settings" {
+		if api.Email == nil {
+			return mustJSON(ErrorResponse{Error: "email manager unavailable"})
+		}
+		switch r.Method {
+		case http.MethodGet:
+			return mustJSON(api.Email.RegistrationSettings())
+		case http.MethodPost:
+			var settings EmailRegistrationSettings
+			if err := json.Unmarshal([]byte(body), &settings); err != nil {
+				return mustJSON(ErrorResponse{Error: "invalid json"})
+			}
+			if err := api.Email.UpdateRegistrationSettings(settings); err != nil {
+				return mustJSON(ErrorResponse{Error: "儲存註冊設定失敗：" + err.Error()})
+			}
+			return mustJSON(api.Email.RegistrationSettings())
+		default:
+			return mustJSON(ErrorResponse{Error: "method not allowed"})
+		}
+	}
 	if len(parts) == 1 && parts[0] == "auto-approval" {
 		switch r.Method {
 		case http.MethodGet:
@@ -73,7 +116,7 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 				"interval_minutes": api.Store.AutoApprovalIntervalMinutes(),
 				"interval":         fmt.Sprintf("%dm0s", api.Store.AutoApprovalIntervalMinutes()),
 				"deprecated":       true,
-				"message":          "舊式自動核准與自動核發已停用；新帳號由 Email 驗證完成後即時核發。",
+				"message":          "舊式定時自動核發已停用；新帳號依系統設定的標準或嚴格模式核發。",
 			})
 		case http.MethodPost:
 			if strings.TrimSpace(body) == "" && r.Body != nil {

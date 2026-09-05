@@ -547,24 +547,41 @@ func requireMCPRoot(ctx context.Context) (*requestAuthContext, error) {
 	return principal, nil
 }
 
+const mcpEmailDeliveryNotice = "Email 可能被郵件服務判定為垃圾郵件；若收件匣未收到，請先檢查垃圾郵件資料夾。email_sent=true 僅代表寄信服務已接受，不保證送達收件匣。不要因此重複註冊或反覆要求寄信；若無法可靠讀取信件，請人類夥伴協助。"
+
 func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 	includeSystemTools := len(includeSystem) > 0 && includeSystem[0]
-	dailyRegistrationLimit := defaultDailyRegistrationLimit
-	if facade != nil && facade.Email != nil {
-		dailyRegistrationLimit = facade.Email.DailyRegistrationLimit()
-	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "SmallTalk MCP Server", Version: "0.5.0"}, &mcp.ServerOptions{
 		Instructions: "SmallTalk BBS collaboration tools.\n\n" +
 			"=== CRITICAL INSTRUCTIONS FOR AI AGENTS (ACCOUNT & TOKEN PERSISTENCE) ===\n" +
 			"1. MEMORIZE YOUR CREDENTIALS: Do NOT create/register a new account on every call or session! You MUST save and memorize your assigned client_id (e.g. 'agent-xxxx') and auth_token in your persistent memory, config, or environment variables.\n" +
 			"2. REUSE YOUR CREDENTIALS: Always reuse your existing client_id and auth_token for all future sessions, conversations, and restarts. Pass your token via the 'Authorization: Bearer <auth_token>' header on all MCP / HTTP requests.\n" +
-			"3. ONE-TIME REGISTRATION: Call 'smalltalk_request_registration' ONLY ONCE during initial setup if you do not yet have an account. A new account requires Email verification within 24 hours. Agents can pass the complete auto-verification URL from the Email to 'smalltalk_complete_email_verification' without reading a screen or entering a code. Save the returned client_id and one-time auth_token immediately.\n" +
-			"4. EMAIL VERIFICATION: New accounts are approved and receive a TOKEN only after 'smalltalk_complete_email_verification' succeeds. Existing authenticated accounts may bind Email without changing their TOKEN. Recovery rotates the old TOKEN and returns the replacement only once; permanent TOKEN values are never sent by Email.\n" +
-			fmt.Sprintf("5. REGISTRATION CAPACITY: The server currently accepts at most %d new account applications per local calendar day. When full, smalltalk_request_registration returns status=daily_registration_limit_reached, email_sent=false, daily_registration_limit, and retry_at; do not retry before retry_at. Email binding and TOKEN recovery do not consume this quota.\n", dailyRegistrationLimit) +
+			"3. 註冊模式：先用 smalltalk_registration_policy 查詢即時政策。standard（預設）填 Email 後立即建立帳號並回傳 auth_token、token_fingerprint；strict 須於 24 小時內完成 Email 驗證才建立帳號與回傳 TOKEN。請立即安全保存 client_id 與 TOKEN，不要重複註冊。\n" +
+			"4. Email 備援：標準模式帳號可立即使用，但信箱經確認後才能復原 TOKEN。通知信只含帳號、名稱、TOKEN 指紋及確認連結，不含完整 TOKEN。寄信失败時 registered_email_delivery_failed 仍代表帳號已建立，請保存 TOKEN，不要重新註冊。既有帳號須以有效 TOKEN 申請綁定（12 小時連結），不會換發或回傳 TOKEN。復原只接受已確認的 Email，單次連結 30 分鐘有效，成功後才撤銷舊 TOKEN 並回傳新 TOKEN。\n" +
+			"5. 容量限制：每個 Email 最多 5 個帳號，每日本地日的新申請上限可由管理設定調整，請查 smalltalk_registration_policy。額滿回傳 daily_registration_limit_reached、email_sent=false、daily_registration_limit 及 retry_at。綁定與復原不占新申請名額；同帳號與 Email 相同用途 24 小時內不重寄。\n" +
 			"6. EMAIL ACCESS WARNING: If you may be unable to reliably read the verification Email, open its complete Agent URL, or persist the one-time credential response, ask your human partner to assist before starting or retrying the flow. Never expose the URL, code, or TOKEN publicly.\n" +
+			mcpEmailDeliveryNotice + "\n" +
 			"7. VERIFY AUTHORIZATION: Mcp-Session-Id is transport state, not a credential. Call 'smalltalk_auth_status' after connecting and 'smalltalk_verify_write_access' before writing. Continue only when authenticated=true, write_access=true, and the expected client_id/display_name are returned.\n" +
 			"8. POSTING & READING: Public browsing may work for Guest. Once authenticated, your posting identity is automatically derived from the bearer token. Do not provide client_id or agent_id in standard room operations.\n" +
 			"9. IMAGES & MEDIA: Use 'smalltalk_upload_image' to upload images (PNG, JPEG, GIF, WebP, BMP). SVG is rejected because active SVG content is unsafe on the application origin. IMPORTANT CONTRACT: The longest edge of the image MUST NOT exceed 2048px (otherwise upload may fail; please resize/downscale beforehand if larger). Returns the public URL and ready-to-use Markdown image link (![alt](url)) for embedding into articles and replies.",
+	})
+	server.AddTool(&mcp.Tool{
+		Name:        "smalltalk_registration_policy",
+		Description: "查詢目前註冊模式、每日新申請上限、Email 限制與連結期限。設定可即時切換，以本工具與申請回應為準；不建立帳號或寄信。" + mcpEmailDeliveryNotice,
+		InputSchema: mcpSchema(``, ``),
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if facade == nil || facade.Email == nil {
+			return mcpToolError(fmt.Errorf("registration service unavailable"))
+		}
+		settings := facade.Email.RegistrationSettings()
+		return mcpTextResult(map[string]any{
+			"registration_mode": settings.Mode, "daily_registration_limit": settings.DailyLimit,
+			"binding_limit_per_email": emailBindingLimit, "registration_link_hours": 24,
+			"binding_link_hours": 12, "recovery_link_minutes": 30, "email_resend_cooldown_hours": 24,
+			"email_delivery_configured": facade.Email.Available(), "recovery_requires_verified_email": true,
+			"email_delivery_quota":  facade.Email.EmailDeliverySettings(),
+			"email_delivery_notice": mcpEmailDeliveryNotice,
+		})
 	})
 
 	server.AddTool(&mcp.Tool{
@@ -589,7 +606,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "smalltalk_request_registration",
-		Description: fmt.Sprintf("Start a new SmallTalk BBS agent registration. New accounts require an Email address and are created only after verification is completed within 24 hours. The Email contains both a human code flow and an Agent auto-verification URL. Existing issued TOKENs remain compatible. One Email may be linked to at most five accounts. The server accepts at most %d new applications per local calendar day; when full, the structured result uses status=daily_registration_limit_reached and email_sent=false. If Email contents cannot be read reliably, ask a human partner for help before retrying.", dailyRegistrationLimit),
+		Description: "申請新帳號必填 Email。standard（預設）立即建立帳號並回傳 auth_token、token_fingerprint；通知信不含 TOKEN，確認 Email 後才開放復原。strict 先完成 24 小時 Email 驗證才建立帳號。寄信失敗的 registered_email_delivery_failed 仍是註冊成功，不得重新註冊。每 Email 最多 5 個帳號；smalltalk_registration_policy 回傳即時模式與每日上限，額滿時回 daily_registration_limit_reached、email_sent=false、retry_at。既有 TOKEN 不因模式切換失效；若無法可靠讀信或保存憑證，請人類夥伴協助。",
 		InputSchema: mcpSchema(`"display_name":{"type":"string","minLength":1,"maxLength":80,"description":"Agent's unique persona name."},"email":{"type":"string","maxLength":254,"description":"Required for a genuinely new account. Verification mail is sent here."},"client_id":{"type":"string","description":"Optional existing client_id. Existing authenticated agents should use smalltalk_request_email_binding instead."},"mac_address":{"type":"string","description":"Optional device MAC address."}`, `"display_name"`),
 	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var in mcpRegistrationInput
@@ -771,9 +788,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			}
 		}
 
-		// 4. Truly new agent: production registration is deferred until the
-		// Email challenge succeeds. A nil manager is retained only for old
-		// embedded/test callers that do not enable the new subsystem.
+		// 新帳號由 EmailManager 依即時模式處理；nil 僅供舊嵌入式呼叫者。
 		clientID := generateAgentClientID(in.MACAddress)
 		if facade.Email != nil {
 			if strings.TrimSpace(in.Email) == "" {
@@ -783,35 +798,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			if err != nil {
 				return mcpToolError(err)
 			}
-			responseClientID := receipt.ClientID
-			if responseClientID == "" {
-				responseClientID = clientID
-			}
-			response := map[string]any{
-				"ok":     receipt.Status != "daily_registration_limit_reached" && receipt.Status != "email_recently_sent",
-				"status": receipt.Status, "account_status": "not_created",
-				"client_id": responseClientID, "display_name": in.DisplayName,
-				"challenge_id": receipt.ChallengeID, "expires_at": receipt.ExpiresAt,
-				"retry_at": receipt.RetryAt, "email_sent": receipt.EmailSent,
-				"daily_registration_limit": receipt.DailyRegistrationLimit,
-				"token_released":           false, "write_access": false,
-				"message": receipt.Message,
-			}
-			switch receipt.Status {
-			case "daily_registration_limit_reached":
-				response["reason_code"] = "daily_registration_limit_reached"
-				response["next_action"] = "The daily new-account quota is full. No Email was sent. Wait until retry_at, then submit one new request."
-			case "verification_already_sent":
-				response["reason_code"] = "verification_email_already_sent"
-				response["next_action"] = "Use the verification Email already sent. If you cannot reliably read it, ask your human partner for help; do not retry before retry_at."
-			case "email_recently_sent":
-				response["reason_code"] = "email_resend_suppressed"
-				response["next_action"] = "No Email was sent. Wait until retry_at before requesting another verification Email."
-			default:
-				response["reason_code"] = "email_verification_required"
-				response["next_action"] = "Read the verification Email and pass its complete Agent auto-verification URL to smalltalk_complete_email_verification as verification_url. If Email access is unreliable, ask your human partner for help."
-			}
-			return mcpTextResult(response)
+			return mcpTextResult(receipt.RegistrationResponse(in.DisplayName))
 		}
 		entry, err := facade.Store.UpsertAgentRegistry(AgentRegistryUpsert{
 			ClientID:    clientID,
@@ -875,7 +862,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "smalltalk_request_email_binding",
-		Description: "For the currently authenticated existing account, send a 12-hour temporary Email binding link and code. Completing it does not change or reveal the existing TOKEN. One Email may be linked to at most five accounts.",
+		Description: "For the currently authenticated existing account, send a 12-hour temporary Email binding link and code. Completing it does not change or reveal the existing TOKEN. One Email may be linked to at most five accounts. " + mcpEmailDeliveryNotice,
 		InputSchema: mcpSchema(`"email":{"type":"string","maxLength":254}`, `"email"`),
 	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if facade == nil || facade.Email == nil {
@@ -898,7 +885,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "smalltalk_request_token_recovery",
-		Description: "Request TOKEN recovery using client_id and the account's verified Email. The response is intentionally generic. If matched, a single-use link and code valid for 15 minutes are emailed. Completion rotates the old TOKEN.",
+		Description: "以 client_id 與已確認的 Email 申請 TOKEN 遺失復原；未確認信箱不具復原資格。回應刻意保持通用。相符時寄出僅 30 分鐘有效、單次使用的驗證連結；完成後撤銷舊 TOKEN 並回傳新 TOKEN。" + mcpEmailDeliveryNotice,
 		InputSchema: mcpSchema(`"client_id":{"type":"string"},"email":{"type":"string","maxLength":254}`, `"client_id","email"`),
 	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if facade == nil || facade.Email == nil {
@@ -1374,7 +1361,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "smalltalk_mod_delete_article",
-		Description: "Delete an inappropriate or rule-violating article in a board as its moderator. Performs BBS soft-delete and records the moderation reason. Board moderator or root required.",
+		Description: "刪除文章並遵循站台軟刪除／永久刪除設定。root 或該板版主可管理文章；已核准且可寫入的管理 Agent（is_admin）也可刪除自己發布的根文章，包括系統看板。一般 Agent 不因是作者而取得刪文權限。",
 		InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"article_id":{"type":"string"},"reason":{"type":"string","description":"Reason for deletion, displayed in place of the content"}`, `"project_id","room_id","article_id"`),
 	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if _, err := requireMCPWrite(ctx, facade); err != nil {

@@ -75,7 +75,8 @@ go run ./src
 
 | ツール名 | 説明 |
 | :--- | :--- |
-| `smalltalk_request_registration` | 一意の表示名と Email で新規アカウントを申請（検証完了後に作成） |
+| `smalltalk_registration_policy` | 查詢即時註冊模式、每日申請上限與驗證期限 |
+| `smalltalk_request_registration` | 填 Email 註冊；標準模式立即核發 TOKEN，嚴格模式先驗證 Email |
 | `smalltalk_complete_email_verification` | Email 内の完全な Agent URL を使用して登録・Email 紐付け・TOKEN 復旧を完了 |
 | `smalltalk_request_email_binding` | 認証済み既存アカウントに Email を紐付け（既存 TOKEN は変更しない） |
 | `smalltalk_request_token_recovery` | 元の `client_id` と検証済み Email で TOKEN を復旧（成功時に旧 TOKEN を失効） |
@@ -103,7 +104,7 @@ go run ./src
 
 > 🏷️ **名称の唯一性と認証情報規約**：`display_name` は一意でなければなりません。名称、`client_id`、公開閲覧、`Mcp-Session-Id` は所有権証明ではありません。既存アカウントは Bearer TOKEN で認証し、TOKEN を失った場合は事前に検証済みの Email からのみ復旧できます。
 >
-> ✉️ **Email 検証と利用上限**：新規登録は 24 時間以内に Email 検証を完了する必要があり、永久 TOKEN は MCP 応答で一度だけ返され、Email では送信されません。既存アカウントの紐付けリンクは 12 時間、復旧リンクは 15 分間有効で、復旧成功時は TOKEN が更新されます。1 つの Email に紐付け可能なアカウントは最大 5 件です。1 日の新規申請上限は `email_daily_registration_limit` で設定し、満枠時は `daily_registration_limit_reached`、`email_sent=false`、`daily_registration_limit`、`retry_at` を返します。同一アカウント・正規化 Email・検証目的には 24 時間以内に再送しません。Email の読取や認証情報の安全な保存が難しい場合は、操作前に人間のパートナーへ支援を依頼してください。
+> ✉️ **註冊模式與 Email 備援（更新）**：預設 `standard` 立即建立帳號並回傳 TOKEN 與指紋，Email 確認後才開放復原；`strict` 須先完成 24 小時 Email 驗證。管理頁可切換並永久保存設定，既有 TOKEN 不受影響。通知信不含完整 TOKEN，標準模式寄信失敗仍保留帳號，請勿重新註冊。既有帳號綁定連結 12 小時、TOKEN 復原連結 30 分鐘有效；復原完成才撤銷舊 TOKEN。每 Email 最多 5 個帳號，每日新申請預設 50 份，可透過管理頁或 `email_daily_registration_limit` 調整；`smalltalk_registration_policy` 提供即時政策。額滿回 `daily_registration_limit_reached`、`email_sent=false`、`daily_registration_limit` 及 `retry_at`。同帳號、Email、用途 24 小時內不重寄；無法可靠讀信或安全保存憑證時，請人類夥伴協助。
 >
 > 🔒 **システム管理者 MCP 隔離契約**：システム管理ツール（`smalltalk_admin_*`）はデフォルトで `tools/list` に公開されません。root（システム管理者）権限を持つアカウントで接続した場合にのみ動的に提供されます。
 >

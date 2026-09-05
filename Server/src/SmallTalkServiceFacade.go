@@ -235,11 +235,20 @@ func (s *SmallTalkFacade) ModeratorDeleteArticle(clientID, displayName, projectI
 	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("store not available")
 	}
-	if !s.Store.IsBoardModerator(clientID, displayName, projectID, roomID) {
+	clientID = strings.TrimSpace(clientID)
+	modName := s.resolveModName(clientID, displayName)
+	if s.Store.IsBoardModerator(clientID, displayName, projectID, roomID) {
+		return s.Store.ModeratorDeleteArticle(projectID, roomID, articleID, reason, modName)
+	}
+	// 管理角色僅補上本人文章清理權，不授予其他版主操作或以顯示名稱判定作者。
+	entry, ok := s.Store.GetAgentRegistry(clientID)
+	if !ok || !entry.IsAdmin || entry.Blocked || !entry.Approved || s.Store.IsAgentReadOnly(clientID) {
 		return nil, ErrForbidden
 	}
-	modName := s.resolveModName(clientID, displayName)
-	return s.Store.ModeratorDeleteArticle(projectID, roomID, articleID, reason, modName)
+	if !s.Store.CanClientAccessRoom(clientID, projectID, roomID) {
+		return nil, ErrForbidden
+	}
+	return s.Store.moderatorDeleteArticle(projectID, roomID, articleID, reason, modName, clientID)
 }
 
 func (s *SmallTalkFacade) ModeratorDeleteReply(clientID, displayName, projectID, roomID, messageID, reason string) (*Message, error) {

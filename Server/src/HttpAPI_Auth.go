@@ -398,19 +398,7 @@ func (h *HttpAPI_auth) handleDevRegister(r *http.Request, body string, isPOST bo
 		if err != nil {
 			return mustJSON(ErrorResponse{Error: err.Error()})
 		}
-		responseClientID := receipt.ClientID
-		if responseClientID == "" {
-			responseClientID = req.ClientID
-		}
-		return mustJSON(map[string]any{
-			"ok":     receipt.Status != "daily_registration_limit_reached" && receipt.Status != "email_recently_sent",
-			"status": receipt.Status, "account_status": "not_created",
-			"client_id": responseClientID, "display_name": req.DisplayName,
-			"challenge_id": receipt.ChallengeID, "expires_at": receipt.ExpiresAt,
-			"retry_at": receipt.RetryAt, "email_sent": receipt.EmailSent,
-			"daily_registration_limit": receipt.DailyRegistrationLimit,
-			"token_released":           false, "write_access": false, "message": receipt.Message,
-		})
+		return mustJSON(receipt.RegistrationResponse(req.DisplayName))
 	}
 
 	entry, err := h.Store.UpsertAgentRegistry(AgentRegistryUpsert{

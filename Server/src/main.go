@@ -47,7 +47,10 @@ func RunService() {
 	var store *Store
 	var storeErr error
 
-	if pgStore, pgErr := ConnectLocalPostgres(); pgErr == nil {
+	postgresEnabled := service.Property.OptBoolean("postgres_enabled", true)
+	if !postgresEnabled {
+		Tools.Log.Print(Tools.LL_Info, "PostgreSQL disabled by configuration; using disk/in-memory store")
+	} else if pgStore, pgErr := ConnectLocalPostgres(); pgErr == nil {
 		Tools.Log.Print(Tools.LL_Info, "Local PostgreSQL connected successfully, loading data directly from SQL (no disk files read)...")
 		store, storeErr = NewStoreWithPostgres(pgStore, maxMsgs)
 		if storeErr != nil {
@@ -103,12 +106,17 @@ func RunService() {
 		Tools.Log.Print(Tools.LL_Error, "email verification initialization failed: %v", storeErr)
 		return
 	}
-	if err := emailManager.SetDailyRegistrationLimit(dailyRegistrationLimit); err != nil {
+	if err := emailManager.ConfigureRegistration(service.Property.OptString("email_registration_mode", registrationModeStandard), dailyRegistrationLimit); err != nil {
 		Tools.Log.Print(Tools.LL_Error, "invalid Email registration configuration: %v", err)
 		return
 	}
 	if !emailManager.Available() {
+		// 註冊仍依模式處理，實際寄送另由全站額度保護。
 		Tools.Log.Print(Tools.LL_Info, "Email verification is configured but delivery is disabled until environment variable %q and email_from are set", resendAPIKeyEnv)
+	}
+	if err := emailManager.ConfigureEmailLimit(service.Property.OptInt("email_daily_send_limit", 100)); err != nil {
+		Tools.Log.Print(Tools.LL_Error, "invalid Email delivery configuration: %v", err)
+		return
 	}
 	store.SetDefaultAdminPassword(defaultPassword)
 	ensureDefaultLobby(store)
@@ -124,7 +132,7 @@ func RunService() {
 			cloud.stopWorkers = append(cloud.stopWorkers, stop)
 		}
 	}
-	// 新帳號改由 Email challenge 成功後即時核准與核發 TOKEN；停用舊的
+	// 新帳號依 EmailManager 的標準／嚴格模式核准與核發 TOKEN；停用舊的
 	// 定時自動核准 worker，既有帳號與已核發 TOKEN 不受影響。
 	if store.AutoApprovalEnabled() {
 		if err := store.SetAutoApprovalEnabled(false); err != nil {
@@ -151,7 +159,7 @@ func RunService() {
 	mcpHandler := NewMCPHTTPHandler(facade)
 	service.AddRestfulAPI("/mcp", &mcpRestfulCallback{handler: mcpHandler})
 	service.AddRestfulAPI("/auth", authAPI)
-	service.AddRestfulAPI("/permissions", &PermissionsAPI{Store: store})
+	service.AddRestfulAPI("/permissions", &PermissionsAPI{Store: store, Email: emailManager})
 	service.AddRestfulAPI("/api", &BBSAPI{Store: store, Facade: facade})
 	if service.HttpService != nil {
 		service.HttpService.SetDefaultHTML(webEntryPath)
@@ -206,7 +214,35 @@ func RunService() {
 		}
 	}()
 
-	<-shutdown
+	restartRequests, stopRestartScheduler := startSelfRestartScheduler(
+		propertyStrings(service.Property, "smalltalk_restart_time"),
+		service.Property.OptString("restart_timezone", ""),
+	)
+	if stopRestartScheduler != nil {
+		cloud.stopWorkers = append(cloud.stopWorkers, stopRestartScheduler)
+	}
+
+	select {
+	case <-shutdown:
+		return
+	case target := <-restartRequests:
+		Tools.Log.Print(Tools.LL_Warning, "SmallTalk self-restart time reached: %s", target)
+		if err := validateSelfRestart(); err != nil {
+			Tools.Log.Print(Tools.LL_Error, "Self-restart preflight failed: %v", err)
+			// Keep serving when the replacement cannot be prepared. An operator or
+			// external supervisor can repair the executable without an avoidable
+			// outage; the next process start will arm the schedule again.
+			<-shutdown
+			return
+		}
+		service.StopService()
+		if err := restartCurrentProcess(); err != nil {
+			Tools.Log.Print(Tools.LL_Error, "Self-restart handoff failed: %v", err)
+			os.Exit(1)
+		}
+		// Windows starts a replacement process instead of replacing this image.
+		os.Exit(0)
+	}
 }
 
 func propertyStrings(property *MarsJSON.JSONObject, key string) []string {

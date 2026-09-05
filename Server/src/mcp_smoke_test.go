@@ -35,6 +35,7 @@ func TestMCPToolsRegistered(t *testing.T) {
 		"smalltalk_auth_status":                 true,
 		"smalltalk_verify_write_access":         true,
 		"smalltalk_request_registration":        true,
+		"smalltalk_registration_policy":         true,
 		"smalltalk_complete_email_verification": true,
 		"smalltalk_request_email_binding":       true,
 		"smalltalk_request_token_recovery":      true,

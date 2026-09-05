@@ -12,6 +12,20 @@ service_dir="$1"
 env_file="$2"
 cd "$service_dir"
 
+systemd_unit="smalltalk-bbs.service"
+if systemctl cat "$systemd_unit" >/dev/null 2>&1; then
+	systemctl restart "$systemd_unit"
+	sleep 2
+	if ! systemctl is-active --quiet "$systemd_unit"; then
+		systemctl --no-pager --full status "$systemd_unit"
+		exit 1
+	fi
+	pid="$(systemctl show --property MainPID --value "$systemd_unit")"
+	printf '%s\n' "$pid" > ./server.pid
+	printf 'SmallTalkServer started by systemd fallback supervisor: pid=%s\n' "$pid"
+	exit 0
+fi
+
 if [[ -r "$env_file" ]]; then
 	set -a
 	# shellcheck disable=SC1090

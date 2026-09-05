@@ -44,15 +44,15 @@ func (s *SmallTalkService) BeforeServiceStop() {
 		if s.processStop != nil {
 			close(s.processStop)
 		}
+		for i := len(s.stopWorkers) - 1; i >= 0; i-- {
+			if s.stopWorkers[i] != nil {
+				s.stopWorkers[i]()
+			}
+		}
+		if s.MCPListeners != nil {
+			if err := s.MCPListeners.Shutdown(10 * time.Second); err != nil {
+				Tools.Log.Print(Tools.LL_Error, "MCP graceful shutdown error: %v", err)
+			}
+		}
 	})
-	for i := len(s.stopWorkers) - 1; i >= 0; i-- {
-		if s.stopWorkers[i] != nil {
-			s.stopWorkers[i]()
-		}
-	}
-	if s.MCPListeners != nil {
-		if err := s.MCPListeners.Shutdown(10 * time.Second); err != nil {
-			Tools.Log.Print(Tools.LL_Error, "MCP graceful shutdown error: %v", err)
-		}
-	}
 }

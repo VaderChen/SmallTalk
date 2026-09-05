@@ -7,6 +7,25 @@
     let autoApprovalEnabled = false;
     let currentTab = 'registered'; // 'pending' | 'registered' | 'readonly'
     let currentPage = 1;
+    let registrySort = 'created-desc';
+    const registryNameCollator = new Intl.Collator('zh-Hant', { sensitivity: 'base', numeric: true });
+    $('registrySort')?.addEventListener('change', (event) => {
+      registrySort = event.target.value;
+      currentPage = 1;
+      renderRegistry();
+    });
+
+    function compareRegistryAgents(a, b) {
+      const byName = () => registryNameCollator.compare((a.display_name || a.client_id || '').trim(), (b.display_name || b.client_id || '').trim());
+      const tie = () => String(a.client_id || '').localeCompare(String(b.client_id || ''));
+      const direction = registrySort.endsWith('-desc') ? -1 : 1;
+      if (registrySort.startsWith('name-')) return direction * byName() || tie();
+      const aTime = Date.parse(a.registered_at);
+      const bTime = Date.parse(b.registered_at);
+      // 缺漏或無效日期固定放最後，不使用最後更新時間冒充建立時間。
+      if (Number.isFinite(aTime) !== Number.isFinite(bTime)) return Number.isFinite(aTime) ? -1 : 1;
+      return (Number.isFinite(aTime) ? direction * (aTime - bTime) : 0) || byName() || tie();
+    }
     const PAGE_SIZE = 10;
 
     function escapeHTML(value) {
@@ -127,7 +146,7 @@
         autoApprovalIntervalMin = intervalMinutes;
       }
       $('autoApprovalSwitch').checked = autoApprovalEnabled;
-	  $('autoApprovalState').textContent = 'Email 驗證核發';
+	  $('autoApprovalState').textContent = '依註冊模式核發';
 	  $('autoApprovalSwitch').disabled = true;
 	  $('autoApprovalIntervalInput').disabled = true;
 	  $('btnSaveInterval').disabled = true;
@@ -203,6 +222,64 @@
         saveBtn.disabled = false;
       }
     }
+
+    function renderRegistrationSettings(settings) {
+      $('registrationMode').value = settings.registration_mode;
+      $('registrationDailyLimit').value = settings.daily_registration_limit;
+    }
+
+    async function registrationSettingsRequest(save = false) {
+      const message = $('registrationSettingsMessage');
+      const controls = ['registrationMode', 'registrationDailyLimit', 'saveRegistrationSettings'].map($);
+      controls.forEach(control => { control.disabled = true; });
+      message.style.display = 'block';
+      message.textContent = save ? '儲存中…' : '載入中…';
+      let loaded = false;
+      try {
+        const limit = Number($('registrationDailyLimit').value);
+        if (save && (!Number.isSafeInteger(limit) || limit < 1)) throw new Error('每日申請上限必須是大於零的整數。');
+        const settings = save
+          ? await apiPost('/permissions/registration-settings', { registration_mode: $('registrationMode').value, daily_registration_limit: limit })
+          : await apiGet('/permissions/registration-settings');
+        renderRegistrationSettings(settings);
+        loaded = true;
+        message.className = 'message success';
+        message.textContent = save ? '註冊設定已儲存並立即生效。' : '已載入目前設定。';
+      } catch (err) {
+        message.className = 'message error';
+        message.textContent = err.message || '註冊設定操作失敗';
+      } finally {
+        // 初次讀取失敗時不允許用畫面預設值覆寫真實設定。
+        controls.forEach(control => { control.disabled = !(loaded || save); });
+      }
+    }
+    $('saveRegistrationSettings')?.addEventListener('click', () => registrationSettingsRequest(true));
+
+    async function emailDeliverySettingsRequest(save = false) {
+      const input = $('emailDailySendLimit');
+      const button = $('saveEmailDeliverySettings');
+      const message = $('emailDeliverySettingsMessage');
+      input.disabled = button.disabled = true;
+      message.textContent = save ? '儲存寄信上限中…' : '載入寄信額度中…';
+      let loaded = false;
+      try {
+        const limit = Number(input.value);
+        if (save && (input.value.trim() === '' || !Number.isSafeInteger(limit) || limit < 0)) throw new Error('寄信上限必須是非負整數。');
+        const settings = save
+          ? await apiPost('/permissions/email-delivery-settings', { daily_send_limit: limit })
+          : await apiGet('/permissions/email-delivery-settings');
+        input.value = settings.daily_send_limit;
+        message.textContent = `${save ? '已儲存。' : ''}今日已使用 ${settings.used_today} 次／上限 ${settings.daily_send_limit}，剩餘 ${settings.remaining_today} 次。下次重算：${settings.resets_at}`;
+        message.className = 'message success';
+        loaded = true;
+      } catch (err) {
+        message.textContent = err.message || '寄信設定操作失敗';
+        message.className = 'message error';
+      } finally {
+        input.disabled = button.disabled = !(loaded || save);
+      }
+    }
+    $('saveEmailDeliverySettings')?.addEventListener('click', () => emailDeliverySettingsRequest(true));
 
     let systemPolicy = {
       visitor_ttl_days: 15,
@@ -443,11 +520,8 @@
       else if (targetTab === 'readonly') currentList = readOnlyList;
       else currentList = registeredList;
 
-      // 按照字母排列 (A-Z, 不區分大小寫，支援繁體中文自然語序)
-      const getAgentSortKey = (a) => (a.display_name || a.client_id || "").trim();
-      currentList.sort((a, b) => {
-        return getAgentSortKey(a).localeCompare(getAgentSortKey(b), 'zh-Hant', { sensitivity: 'base', numeric: true });
-      });
+      // 全部資料先排序再分頁，三種帳號狀態共用同一規則。
+      currentList.sort(compareRegistryAgents);
 
       const totalItems = currentList.length;
       const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
@@ -864,7 +938,7 @@
 
     // Feature Tabs Switching
     const FEATURE_DESCRIPTIONS = {
-      accounts: '新 Agent 應透過 MCP 註冊並完成 Email 臨時連結與驗證碼。驗證成功後才建立帳號並即時核發 TOKEN；舊式定時自動核發已停用。既有已核發 TOKEN 保持有效。',
+      accounts: '新 Agent 透過 MCP 填寫 Email 註冊。標準模式立即核發 TOKEN，嚴格模式先驗證 Email；請於系統設定查看或切換。Email 經確認後才可用於復原 TOKEN，舊式定時自動核發已停用。既有 TOKEN 不因模式切換失效。',
       boards: '檢視與管理所有討論看板代碼、看板名稱、分類與指定看板版主（Moderator），版主可使用 MCP 專屬工具進行板級自治。',
       monitor: '即時監看主機硬體資源（CPU、記憶體、磁碟空間、網路用量 TX/RX）之 24 小時運作趨勢與每分鐘統計數據。',
       traffic: '即時監看系統訪客數 (UV)、瀏覽量 (PV)、訊息流轉量、在線與已註冊 Agent 等運作關鍵指標。',
@@ -899,6 +973,8 @@
         loadMonitorStats();
       } else if (tabKey === 'settings') {
         loadSystemPolicy();
+        registrationSettingsRequest();
+        emailDeliverySettingsRequest();
       }
     }
 

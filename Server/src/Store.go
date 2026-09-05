@@ -385,6 +385,9 @@ func (s *Store) LoadFromPostgres() error {
 	if err != nil {
 		return fmt.Errorf("load agent registry: %w", err)
 	}
+	if err := s.migrateRegistryRolesLocked(pgRegistry); err != nil {
+		return err
+	}
 	if pgRegistry != nil {
 		s.agentRegistry = pgRegistry
 	}
@@ -555,6 +558,9 @@ func (s *Store) syncWithPostgres() error {
 	pgRegistry, err := s.pg.LoadAllAgentRegistry()
 	if err != nil {
 		return fmt.Errorf("load agent registry for synchronization: %w", err)
+	}
+	if err := s.migrateRegistryRolesLocked(pgRegistry); err != nil {
+		return err
 	}
 	if len(pgRegistry) > 0 {
 		for k, v := range pgRegistry {
@@ -2051,6 +2057,11 @@ func (s *Store) IsArticleLocked(projectID, roomID, articleID string) (bool, stri
 }
 
 func (s *Store) ModeratorDeleteArticle(projectID, roomID, articleID, reason, modName string) (*Message, error) {
+	return s.moderatorDeleteArticle(projectID, roomID, articleID, reason, modName, "")
+}
+
+// requiredAuthor 非空時，在同一房間鎖內核對根文章作者後才刪除。
+func (s *Store) moderatorDeleteArticle(projectID, roomID, articleID, reason, modName, requiredAuthor string) (*Message, error) {
 	articleID = strings.TrimSpace(articleID)
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
@@ -2075,6 +2086,26 @@ func (s *Store) ModeratorDeleteArticle(projectID, roomID, articleID, reason, mod
 	s.mu.RUnlock()
 
 	r.mu.Lock()
+	if requiredAuthor != "" {
+		owned := false
+		for _, msg := range r.Messages {
+			target := strings.TrimSpace(msg.ArticleID)
+			if target == "" {
+				target = strings.TrimSpace(msg.ID)
+			}
+			if target == articleID && strings.TrimSpace(msg.ReplyToMessageID) == "" {
+				if msg.AgentID != requiredAuthor {
+					r.mu.Unlock()
+					return nil, ErrForbidden
+				}
+				owned = true
+			}
+		}
+		if !owned {
+			r.mu.Unlock()
+			return nil, ErrForbidden
+		}
+	}
 	originalMessages := make([]Message, len(r.Messages))
 	for i := range r.Messages {
 		originalMessages[i] = r.Messages[i]
@@ -3386,4 +3417,22 @@ func (s *Store) PruneVisitorMessages(maxAge time.Duration) (int, error) {
 	}
 	r.mu.Unlock()
 	return prunedCount, nil
+}
+
+// 呼叫端持有 s.mu；僅首次遷移採用既有私有 Registry 的角色，不推測或自動升權。
+func (s *Store) migrateRegistryRolesLocked(entries map[string]*AgentRegistryEntry) error {
+	for id, entry := range entries {
+		if entry == nil || entry.postgresRoleLoaded {
+			continue
+		}
+		if previous := s.agentRegistry[id]; previous != nil {
+			entry.IsAdmin = previous.IsAdmin
+			entry.IsAdminAt = previous.IsAdminAt
+		}
+		if err := s.pg.migrateAgentRegistryRole(entry); err != nil {
+			return fmt.Errorf("遷移管理角色: %w", err)
+		}
+		entry.postgresRoleLoaded = true
+	}
+	return nil
 }
