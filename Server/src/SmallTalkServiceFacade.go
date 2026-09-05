@@ -61,21 +61,27 @@ func (s *SmallTalkFacade) ListMessages(clientID, projectID, roomID string, opts 
 	if err := s.authorizeRoom(clientID, projectID, roomID); err != nil {
 		return MessagePage{}, err
 	}
-	return s.Store.ListMessagesPage(projectID, roomID, opts)
+	out, err := s.Store.ListMessagesPage(projectID, roomID, opts)
+	s.Store.projectCurrentNames(&out)
+	return out, err
 }
 
 func (s *SmallTalkFacade) ListArticles(clientID, projectID, roomID string, opts ArticleRangeOptions) ([]ArticleSummary, error) {
 	if err := s.authorizeRoom(clientID, projectID, roomID); err != nil {
 		return nil, err
 	}
-	return s.Store.ListArticles(projectID, roomID, opts)
+	out, err := s.Store.ListArticles(projectID, roomID, opts)
+	s.Store.projectCurrentNames(&out)
+	return out, err
 }
 
 func (s *SmallTalkFacade) GetArticle(clientID, projectID, roomID, articleID string) (*ArticleSummary, error) {
 	if err := s.authorizeRoom(clientID, projectID, roomID); err != nil {
 		return nil, err
 	}
-	return s.Store.GetArticle(projectID, roomID, articleID)
+	out, err := s.Store.GetArticle(projectID, roomID, articleID)
+	s.Store.projectCurrentNames(&out)
+	return out, err
 }
 
 func (s *SmallTalkFacade) ListPresence(clientID, projectID, roomID string) ([]Presence, error) {
@@ -148,21 +154,37 @@ func (s *SmallTalkFacade) SearchMessages(clientID, query string, limit int) ([]M
 	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("store not available")
 	}
-	return s.Store.SearchMessagesForClient(clientID, query, limit), nil
+	out := s.Store.SearchMessagesForClient(clientID, query, limit)
+	s.Store.projectCurrentNames(&out)
+	return out, nil
 }
 
 func (s *SmallTalkFacade) ListAuthorArticles(clientID, authorID string, limit int) ([]ArticleSummary, error) {
 	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("store not available")
 	}
-	return s.Store.ListArticlesByAuthorForClient(clientID, authorID, limit), nil
+	if _, exists := s.Store.GetAgentRegistry(authorID); !exists {
+		if entry, ok := s.Store.FindAgentRegistryByExactDisplayName(authorID); ok {
+			authorID = entry.ClientID
+		}
+	}
+	out := s.Store.ListArticlesByAuthorForClient(clientID, authorID, limit)
+	s.Store.projectCurrentNames(&out)
+	return out, nil
 }
 
 func (s *SmallTalkFacade) ListAuthorReplies(clientID, authorID string, limit int) ([]MessageSearchHit, error) {
 	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("store not available")
 	}
-	return s.Store.ListRepliesByAuthorForClient(clientID, authorID, limit), nil
+	if _, exists := s.Store.GetAgentRegistry(authorID); !exists {
+		if entry, ok := s.Store.FindAgentRegistryByExactDisplayName(authorID); ok {
+			authorID = entry.ClientID
+		}
+	}
+	out := s.Store.ListRepliesByAuthorForClient(clientID, authorID, limit)
+	s.Store.projectCurrentNames(&out)
+	return out, nil
 }
 
 func (s *SmallTalkFacade) EditArticle(clientID, projectID, roomID, messageID, title, text string) (*Message, error) {
@@ -313,7 +335,9 @@ func (s *SmallTalkFacade) GetNewMessages(clientID, projectID, roomID, afterID st
 	if limit > 2000 {
 		limit = 2000
 	}
-	return s.Store.ListMessagesAfter(projectID, roomID, afterID, afterTS, limit)
+	out, err := s.Store.ListMessagesAfter(projectID, roomID, afterID, afterTS, limit)
+	s.Store.projectCurrentNames(&out)
+	return out, err
 }
 
 func (s *SmallTalkFacade) WaitForNewMessages(ctx context.Context, clientID, projectID, roomID, afterID string, afterTS time.Time, limit int, timeout time.Duration) ([]Message, error) {
@@ -339,6 +363,7 @@ func (s *SmallTalkFacade) WaitForNewMessages(ctx context.Context, clientID, proj
 		return nil, err
 	}
 	if len(messages) > 0 {
+		s.Store.projectCurrentNames(&messages)
 		return messages, nil
 	}
 
@@ -355,6 +380,7 @@ func (s *SmallTalkFacade) WaitForNewMessages(ctx context.Context, clientID, proj
 			return nil, err
 		}
 		if len(messages) > 0 {
+			s.Store.projectCurrentNames(&messages)
 			return messages, nil
 		}
 

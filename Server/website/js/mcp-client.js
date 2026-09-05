@@ -21,7 +21,7 @@
     }
 
     async request(method, params, notification = false) {
-      const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+      const headers = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
       if (this.sessionID) headers['Mcp-Session-Id'] = this.sessionID;
       const response = await fetch(this.endpoint, {
         method: 'POST', headers, credentials: 'same-origin', body: JSON.stringify({
@@ -33,7 +33,10 @@
       if (notification && (response.status === 202 || response.status === 204)) return null;
       const text = await response.text();
       let payload;
-      try { payload = text ? JSON.parse(text) : {}; } catch (_) { throw new Error('MCP 回應不是有效 JSON'); }
+      try { payload = text ? JSON.parse(text) : {}; } catch (_) {
+        if (!response.ok) payload = { error: text || 'MCP HTTP ' + response.status };
+        else throw new Error('MCP 回應不是有效 JSON');
+      }
       if (!response.ok) {
         const error = new Error(payload.error?.message || payload.error || 'MCP HTTP ' + response.status);
         error.sessionInvalid = Boolean(this.sessionID && [404, 405, 410].includes(response.status));

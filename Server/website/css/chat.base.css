@@ -159,7 +159,7 @@
 
     .boardHead,
     .boardRow {
-      grid-template-columns: 22px 60px 190px 68px minmax(140px, 1fr) 56px 64px 120px;
+      grid-template-columns: 22px 60px 190px 68px minmax(140px, 1fr) 80px 64px 120px;
       column-gap: 8px;
     }
 
@@ -188,7 +188,7 @@
 
     .threadHead,
     .threadRow {
-      grid-template-columns: 22px 60px 100px 140px minmax(140px, 1fr) 64px 64px;
+      grid-template-columns: 22px 60px 100px 140px minmax(140px, 1fr) 80px 64px;
       column-gap: 8px;
     }
 

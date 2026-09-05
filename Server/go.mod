@@ -3,7 +3,7 @@ module SmallTalkServer
 go 1.25.6
 
 require (
-	github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.20
+	github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.21
 	github.com/lib/pq v1.12.3
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/rs/xid v1.4.0

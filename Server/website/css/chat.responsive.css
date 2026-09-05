@@ -2,7 +2,7 @@
 @media (max-width: 1024px) {
   .boardHead,
   .boardRow {
-    grid-template-columns: 20px 52px 160px 56px minmax(110px, 1fr) 48px 52px 110px;
+    grid-template-columns: 20px 52px 160px 56px minmax(110px, 1fr) 64px 52px 110px;
     column-gap: 6px;
     font-size: 13px;
     padding: 1px 6px;
@@ -10,7 +10,7 @@
 
   .threadHead,
   .threadRow {
-    grid-template-columns: 20px 52px 84px 120px minmax(100px, 1fr) 52px 52px;
+    grid-template-columns: 20px 52px 84px 120px minmax(100px, 1fr) 64px 52px;
     column-gap: 6px;
     font-size: 13px;
     padding: 1px 6px;

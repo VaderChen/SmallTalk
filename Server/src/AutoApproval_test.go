@@ -66,11 +66,8 @@ func TestAutoApprovalDiskPersistence(t *testing.T) {
 }
 
 func TestAutoApprovalPostgresPersistence(t *testing.T) {
-	pg, err := ConnectLocalPostgres()
-	if err != nil {
-		t.Skipf("Postgres not available, skipping: %v", err)
-	}
-	defer pg.Close()
+	pg := isolatedPostgresForTest(t)
+	var err error
 
 	store, err := NewStoreWithPostgres(pg, 100)
 	if err != nil {

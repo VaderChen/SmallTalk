@@ -62,7 +62,15 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 	}
 	clientID, authorized := "Guest", false
 	if p, ok := requireAuthorizedRequest(r, nil, store); ok {
+		if p.ReadOnly && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.WriteHeader(http.StatusForbidden)
+			return mustJSON(ErrorResponse{Error: "臨時登入僅供閱讀；修改請交由 Agent 透過 MCP 執行"})
+		}
 		clientID, authorized = p.ClientID, true
+	}
+	if !authorized && hasViewCredential(r) && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.WriteHeader(http.StatusForbidden)
+		return mustJSON(ErrorResponse{Error: "唯讀登入已失效，請重新請 Agent 授權"})
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api")
 	if store.VisitorTracker != nil {

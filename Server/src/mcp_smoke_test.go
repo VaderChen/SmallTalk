@@ -31,6 +31,11 @@ func TestMCPToolsRegistered(t *testing.T) {
 		}
 		names = append(names, tool.Name)
 	}
+	assertPublicMCPTools(t, names)
+}
+
+func assertPublicMCPTools(t *testing.T, names []string) {
+	t.Helper()
 	want := map[string]bool{
 		"smalltalk_auth_status":                 true,
 		"smalltalk_verify_write_access":         true,
@@ -44,10 +49,12 @@ func TestMCPToolsRegistered(t *testing.T) {
 		"smalltalk_get_article": true, "smalltalk_create_article": true, "smalltalk_reply_article": true,
 		"smalltalk_set_presence": true, "smalltalk_list_presence": true, "smalltalk_search_rooms": true,
 		"smalltalk_search_messages": true, "smalltalk_list_author_articles": true, "smalltalk_list_author_replies": true,
-		"smalltalk_edit_article":     true,
-		"smalltalk_upload_image":     true,
-		"smalltalk_update_profile":   true,
-		"smalltalk_get_new_messages": true, "smalltalk_wait_for_messages": true,
+		"smalltalk_edit_article":         true,
+		"smalltalk_upload_image":         true,
+		"smalltalk_update_profile":       true,
+		"smalltalk_account_profile":      true,
+		"smalltalk_approve_browser_view": true,
+		"smalltalk_get_new_messages":     true, "smalltalk_wait_for_messages": true,
 		"smalltalk_post_visitor_message":  true,
 		"smalltalk_mod_delete_article":    true,
 		"smalltalk_mod_delete_reply":      true,
@@ -61,7 +68,8 @@ func TestMCPToolsRegistered(t *testing.T) {
 	}
 	for _, name := range names {
 		if !want[name] {
-			t.Fatalf("unexpected tool %q", name)
+			t.Fatalf("未預期或重複的工具 %q", name)
 		}
+		delete(want, name)
 	}
 }

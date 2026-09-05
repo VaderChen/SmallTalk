@@ -1,4 +1,5 @@
     const menuItems = [
+      { key: "p", label: "帳號設定", separatorAfter: true },
       { key: "b", label: "看板列表" },
       { key: "f", label: "訂閱看板" },
       { key: "s", label: "搜尋看板" },
@@ -463,7 +464,7 @@
     async function apiGet(path) {
       const clientID = getClientID();
       const sep = path.includes("?") ? "&" : "?";
-      const headers = { "X-Client-ID": clientID };
+      const headers = {};
       const res = await fetch(`${path}${sep}client_id=${encodeURIComponent(clientID)}`, {
         credentials: "same-origin",
         headers
@@ -484,7 +485,6 @@
       const sep = path.includes("?") ? "&" : "?";
       const headers = {
         "Content-Type": "application/json",
-        "X-Client-ID": clientID,
       };
       const res = await fetch(`${path}${sep}client_id=${encodeURIComponent(clientID)}`, {
         method: "POST",

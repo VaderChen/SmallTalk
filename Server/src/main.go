@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -60,6 +61,11 @@ func RunService() {
 			Tools.Log.Print(Tools.LL_Info, "PostgreSQL mode active: all data loaded and managed via PostgreSQL dedicated tables")
 		}
 	} else {
+		var profileErr *ProfileSchemaError
+		if errors.As(pgErr, &profileErr) {
+			Tools.Log.Print(Tools.LL_Error, "帳號名稱資料升級失敗，停止啟動: %v", pgErr)
+			return
+		}
 		Tools.Log.Print(Tools.LL_Info, "Local PostgreSQL not connected: %v (using disk/in-memory fallback)", pgErr)
 	}
 

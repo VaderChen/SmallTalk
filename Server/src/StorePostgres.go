@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -10,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 var validIdentRe = regexp.MustCompile(`[^a-zA-Z0-9_]`)
@@ -44,6 +45,10 @@ func ConnectLocalPostgres() (*PostgresStore, error) {
 		pg, err := NewPostgresStore(dsn)
 		if err == nil {
 			return pg, nil
+		}
+		var profileErr *ProfileSchemaError
+		if errors.As(err, &profileErr) {
+			return nil, err
 		}
 		lastErr = err
 	}
@@ -194,6 +199,13 @@ func (pg *PostgresStore) initSystemSchema() error {
 	ALTER TABLE agent_registry ADD COLUMN IF NOT EXISTS is_admin_at TEXT;`); err != nil {
 		return fmt.Errorf("初始化管理角色欄位: %w", err)
 	}
+	if _, err := pg.db.Exec(`CREATE TABLE IF NOT EXISTS browser_view_requests (id TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL, payload JSONB NOT NULL)`); err != nil {
+		return &ProfileSchemaError{Err: err}
+	}
+	if err := pg.initProfileSchema(); err != nil {
+		return &ProfileSchemaError{err}
+	}
+
 	_, _ = pg.db.Exec(`ALTER TABLE agent_registry ADD COLUMN IF NOT EXISTS read_only BOOLEAN DEFAULT FALSE;`)
 	_, _ = pg.db.Exec(`ALTER TABLE agent_registry ADD COLUMN IF NOT EXISTS read_only_at TEXT;`)
 	_, _ = pg.db.Exec(`ALTER TABLE presence ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ DEFAULT NOW();`)
@@ -543,6 +555,14 @@ func (pg *PostgresStore) LoadMessagesForRoom(projectID, roomID string, limit int
 }
 
 func (pg *PostgresStore) SaveAgentRegistryEntry(entry *AgentRegistryEntry) error {
+	return saveAgentRegistryEntry(pg.db, entry)
+}
+
+type registryExecutor interface {
+	Exec(string, ...any) (sql.Result, error)
+}
+
+func saveAgentRegistryEntry(db registryExecutor, entry *AgentRegistryEntry) error {
 	if entry == nil || strings.TrimSpace(entry.ClientID) == "" {
 		return nil
 	}
@@ -556,11 +576,11 @@ func (pg *PostgresStore) SaveAgentRegistryEntry(entry *AgentRegistryEntry) error
 	INSERT INTO agent_registry (
 		client_id, display_name, mac_address, approved, approved_at,
 		blocked, blocked_at, token_issued, token_issued_at, token_expires_at,
-		token, registered_at, last_seen_at, read_only, read_only_at, meta, is_admin, is_admin_at
+		token, registered_at, last_seen_at, read_only, read_only_at, meta, is_admin, is_admin_at, display_name_key, renamed_at, name_history
 	) VALUES (
 		$1, $2, $3, $4, $5,
 		$6, $7, $8, $9, $10,
-		$11, $12, $13, $14, $15, $16, $17, $18
+		$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
 	) ON CONFLICT (client_id) DO UPDATE
 	SET display_name = EXCLUDED.display_name,
 	    mac_address = EXCLUDED.mac_address,
@@ -578,14 +598,22 @@ func (pg *PostgresStore) SaveAgentRegistryEntry(entry *AgentRegistryEntry) error
 	    read_only_at = EXCLUDED.read_only_at,
 	    meta = EXCLUDED.meta,
 	    is_admin = EXCLUDED.is_admin,
-	    is_admin_at = EXCLUDED.is_admin_at;
+	    is_admin_at = EXCLUDED.is_admin_at,
+ display_name_key=EXCLUDED.display_name_key,renamed_at=EXCLUDED.renamed_at,name_history=EXCLUDED.name_history;
 	`
 
-	_, err := pg.db.Exec(query,
+	history, err := json.Marshal(entry.NameHistory)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(query,
 		entry.ClientID, entry.DisplayName, entry.MACAddress, entry.Approved, entry.ApprovedAt,
 		entry.Blocked, entry.BlockedAt, entry.TokenIssued, entry.TokenIssuedAt, entry.TokenExpiresAt,
-		entry.Token, entry.RegisteredAt, entry.LastSeenAt, entry.ReadOnly, entry.ReadOnlyAt, metaJSON, entry.IsAdmin, entry.IsAdminAt,
+		entry.Token, entry.RegisteredAt, entry.LastSeenAt, entry.ReadOnly, entry.ReadOnlyAt, metaJSON, entry.IsAdmin, entry.IsAdminAt, profileNameKey(entry.DisplayName), entry.RenamedAt, history,
 	)
+	if conflict, ok := err.(*pq.Error); ok && conflict.Code == "23505" && conflict.Constraint == "agent_registry_display_name_key_unique" {
+		return fmt.Errorf("名稱已被其他帳號使用，請選擇不同名稱")
+	}
 	return err
 }
 
@@ -593,7 +621,7 @@ func (pg *PostgresStore) LoadAllAgentRegistry() (map[string]*AgentRegistryEntry,
 	query := `
 	SELECT client_id, display_name, mac_address, approved, approved_at,
 	       blocked, blocked_at, token_issued, token_issued_at, token_expires_at,
-	       token, registered_at, last_seen_at, read_only, read_only_at, meta, is_admin, is_admin_at
+	       token, registered_at, last_seen_at, read_only, read_only_at, meta, is_admin, is_admin_at, renamed_at, name_history
 	FROM agent_registry;
 	`
 	rows, err := pg.db.Query(query)
@@ -607,14 +635,21 @@ func (pg *PostgresStore) LoadAllAgentRegistry() (map[string]*AgentRegistryEntry,
 		var e AgentRegistryEntry
 		var admin sql.NullBool
 		var adminAt sql.NullString
-		var metaBytes []byte
+		var metaBytes, historyBytes []byte
+		var renamedAt sql.NullString
 		var disp, mac, appAt, blkAt, tokIssAt, tokExpAt, tok, regAt, lastSeen, roAt sql.NullString
 		if err := rows.Scan(
 			&e.ClientID, &disp, &mac, &e.Approved, &appAt,
 			&e.Blocked, &blkAt, &e.TokenIssued, &tokIssAt, &tokExpAt,
-			&tok, &regAt, &lastSeen, &e.ReadOnly, &roAt, &metaBytes, &admin, &adminAt,
+			&tok, &regAt, &lastSeen, &e.ReadOnly, &roAt, &metaBytes, &admin, &adminAt, &renamedAt, &historyBytes,
 		); err != nil {
 			return nil, err
+		}
+		e.RenamedAt = renamedAt.String
+		if len(historyBytes) > 0 {
+			if err := json.Unmarshal(historyBytes, &e.NameHistory); err != nil {
+				return nil, err
+			}
 		}
 		e.IsAdmin = admin.Bool
 		e.IsAdminAt = adminAt.String

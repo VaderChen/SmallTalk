@@ -12,6 +12,8 @@ import (
 )
 
 type requestAuthContext struct {
+	ReadOnly       bool
+	CredentialHash string
 	// Kind is kept for compatibility with existing HTTP handlers.
 	Kind          string
 	PrincipalType string // agent, human, or root
@@ -31,11 +33,11 @@ func hasURLCredential(r *http.Request) bool {
 }
 
 func (ctx *requestAuthContext) IsSystem() bool {
-	return ctx != nil && strings.EqualFold(strings.TrimSpace(ctx.ClientID), "root") && strings.EqualFold(strings.TrimSpace(ctx.TokenKind), "system")
+	return ctx != nil && !ctx.ReadOnly && strings.EqualFold(strings.TrimSpace(ctx.ClientID), "root") && strings.EqualFold(strings.TrimSpace(ctx.TokenKind), "system")
 }
 
 func (ctx *requestAuthContext) IsRoot() bool {
-	if ctx == nil {
+	if ctx == nil || ctx.ReadOnly {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(ctx.ClientID), "root") || strings.EqualFold(strings.TrimSpace(ctx.PrincipalType), "root")
@@ -64,6 +66,13 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 		}
 
 		if store != nil {
+			if strings.HasPrefix(token, webViewPrefix) {
+				if p, ok := store.authorizeViewToken(token); ok {
+					p.SourceIP = sourceIP
+					return p, true
+				}
+				continue
+			}
 			if record, ok := store.AuthorizeAuthToken(token, sourceIP); ok {
 				if entry, exists := store.GetAgentRegistry(record.ClientID); exists && entry.Blocked {
 					continue
@@ -91,12 +100,13 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 						principalType = "root"
 					}
 					return &requestAuthContext{
-						Kind:          "smalltalk",
-						PrincipalType: principalType,
-						TokenKind:     strings.TrimSpace(record.Kind),
-						ClientID:      strings.TrimSpace(record.ClientID),
-						SourceIP:      sourceIP,
-						AuthExpiresAt: strings.TrimSpace(record.ExpiresAt),
+						Kind:           "smalltalk",
+						PrincipalType:  principalType,
+						TokenKind:      strings.TrimSpace(record.Kind),
+						CredentialHash: viewHash(token),
+						ClientID:       strings.TrimSpace(record.ClientID),
+						SourceIP:       sourceIP,
+						AuthExpiresAt:  strings.TrimSpace(record.ExpiresAt),
 					}, true
 				}
 				principalType := "agent"
@@ -107,12 +117,13 @@ func requireAuthorizedRequest(r *http.Request, jwt *MarsJSON.JSONObject, store *
 					principalType = "root"
 				}
 				return &requestAuthContext{
-					Kind:          "smalltalk-dev",
-					PrincipalType: principalType,
-					TokenKind:     strings.TrimSpace(record.Kind),
-					ClientID:      strings.TrimSpace(record.ClientID),
-					SourceIP:      sourceIP,
-					AuthExpiresAt: strings.TrimSpace(record.ExpiresAt),
+					Kind:           "smalltalk-dev",
+					PrincipalType:  principalType,
+					TokenKind:      strings.TrimSpace(record.Kind),
+					CredentialHash: viewHash(token),
+					ClientID:       strings.TrimSpace(record.ClientID),
+					SourceIP:       sourceIP,
+					AuthExpiresAt:  strings.TrimSpace(record.ExpiresAt),
 				}, true
 			}
 		}
@@ -297,6 +308,16 @@ func isRegisteredAgentSource(entry AgentRegistryEntry, sourceIP string) bool {
 	}
 	for _, key := range []string{"source_ip", "dev_login_ip"} {
 		if recorded, ok := entry.Meta[key].(string); ok && isSameSubnetOrLocal(recorded, sourceIP) {
+			return true
+		}
+	}
+	return false
+}
+
+// 即使臨時 session 已失效，也不能退回訪客寫入路徑。
+func hasViewCredential(r *http.Request) bool {
+	for _, token := range candidateAuthTokens(r) {
+		if strings.HasPrefix(token, webViewPrefix) {
 			return true
 		}
 	}

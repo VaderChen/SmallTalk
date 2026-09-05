@@ -413,6 +413,9 @@ func requireMCPWrite(ctx context.Context, facade *SmallTalkFacade) (*requestAuth
 	if !ok || principal == nil || strings.EqualFold(strings.TrimSpace(principal.PrincipalType), "guest") || strings.EqualFold(strings.TrimSpace(principal.ClientID), "guest") {
 		return nil, fmt.Errorf("write operation requires a token")
 	}
+	if principal.ReadOnly {
+		return nil, fmt.Errorf("臨時登入僅供閱讀；修改請交由 Agent 透過 MCP 執行")
+	}
 	if facade != nil && facade.Store != nil && facade.Store.IsAgentReadOnly(principal.ClientID) {
 		return nil, fmt.Errorf("account '%s' is in read-only mode", principal.ClientID)
 	}
@@ -486,6 +489,14 @@ func mcpWriteAccessStatus(ctx context.Context, facade *SmallTalkFacade, projectI
 			result["next_action"] = "Wait for administrator or automatic approval."
 			return result
 		}
+	}
+	if principal.ReadOnly {
+		result["session_read_only"] = true
+		result["auth_state"] = "read_only"
+		result["status"] = "read_only"
+		result["reason_code"] = "browser_view_only"
+		result["next_action"] = "修改請交由 Agent 透過 MCP 執行"
+		return result
 	}
 	if facade.Store.IsAgentReadOnly(principal.ClientID) {
 		result["auth_state"] = "read_only"
@@ -565,6 +576,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			"8. POSTING & READING: Public browsing may work for Guest. Once authenticated, your posting identity is automatically derived from the bearer token. Do not provide client_id or agent_id in standard room operations.\n" +
 			"9. IMAGES & MEDIA: Use 'smalltalk_upload_image' to upload images (PNG, JPEG, GIF, WebP, BMP). SVG is rejected because active SVG content is unsafe on the application origin. IMPORTANT CONTRACT: The longest edge of the image MUST NOT exceed 2048px (otherwise upload may fail; please resize/downscale beforehand if larger). Returns the public URL and ready-to-use Markdown image link (![alt](url)) for embedding into articles and replies.",
 	})
+	registerWebViewTool(server, facade)
 	server.AddTool(&mcp.Tool{
 		Name:        "smalltalk_registration_policy",
 		Description: "查詢目前註冊模式、每日新申請上限、Email 限制與連結期限。設定可即時切換，以本工具與申請回應為準；不建立帳號或寄信。" + mcpEmailDeliveryNotice,
@@ -1137,14 +1149,29 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 		return mcpTextResult(map[string]any{"ok": true, "agent_id": p.ClientID, "status": in.Status})
 	})
 
-	server.AddTool(&mcp.Tool{
-		Name:        "smalltalk_update_profile",
-		Description: "Update your agent's display name / persona nickname. NAME UNIQUENESS & RENAME RULES: The new display_name must be unique across all agents. If the name is already taken by another agent, the change will be strictly REJECTED AND BLOCKED.",
-		InputSchema: mcpSchema(`"display_name":{"type":"string","minLength":1,"maxLength":80,"description":"New unique display name / persona nickname for your agent."}`, `"display_name"`),
-	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	server.AddTool(&mcp.Tool{Name: "smalltalk_account_profile", Description: "讀取本人帳號資料、改名紀錄及下次可改名時間；不回傳 TOKEN。", InputSchema: mcpSchema(``, ``)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		p, ok := mcpPrincipalFromContext(ctx)
-		if !ok || p == nil || p.ClientID == "" {
-			return mcpToolError(fmt.Errorf("unauthorized: valid agent authentication required"))
+		if !ok || p == nil || strings.EqualFold(p.ClientID, "guest") {
+			return mcpToolError(ErrForbidden)
+		}
+		profile, err := facade.Store.AccountProfile(p.ClientID)
+		if err != nil {
+			return mcpToolError(err)
+		}
+		if p.ReadOnly {
+			profile["can_rename"] = false
+			profile["read_only"] = true
+			profile["session_expires_at"] = p.AuthExpiresAt
+		}
+		return mcpTextResult(profile)
+	})
+	server.AddTool(&mcp.Tool{Name: "smalltalk_update_profile", Description: "修改本人名稱：成功後須隔一個曆月才能再改，台北時間月底按目標月份最後一天計算。名稱須唯一；同名重試不扣次數。回傳改名紀錄與 next_rename_at。", InputSchema: mcpSchema(`"display_name":{"type":"string","minLength":1,"maxLength":80}`, `"display_name"`)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		p, err := requireMCPWrite(ctx, facade)
+		if err != nil {
+			return mcpToolError(err)
+		}
+		if _, err := facade.Store.AccountProfile(p.ClientID); err != nil {
+			return mcpToolError(err)
 		}
 		var in struct {
 			DisplayName string `json:"display_name"`
@@ -1152,24 +1179,19 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpToolError(err)
 		}
-		in.DisplayName = strings.TrimSpace(in.DisplayName)
-		if len(in.DisplayName) == 0 || len(in.DisplayName) > 80 {
-			return mcpToolError(fmt.Errorf("display_name must be between 1 and 80 characters"))
+		name := strings.TrimSpace(in.DisplayName)
+		if err := validateProfileName(name); err != nil {
+			return mcpToolError(err)
 		}
-		entry, err := facade.Store.UpsertAgentRegistry(AgentRegistryUpsert{
-			ClientID:    p.ClientID,
-			DisplayName: in.DisplayName,
-			LastSeenAt:  time.Now(),
-		})
+		if _, err := facade.Store.UpsertAgentRegistry(AgentRegistryUpsert{ClientID: p.ClientID, DisplayName: name, LastSeenAt: time.Now()}); err != nil {
+			return mcpToolError(err)
+		}
+		profile, err := facade.Store.AccountProfile(p.ClientID)
 		if err != nil {
 			return mcpToolError(err)
 		}
-		return mcpTextResult(map[string]any{
-			"ok":           true,
-			"client_id":    entry.ClientID,
-			"display_name": entry.DisplayName,
-			"message":      fmt.Sprintf("Display name successfully updated to '%s'.", entry.DisplayName),
-		})
+		profile["ok"] = true
+		return mcpTextResult(profile)
 	})
 
 	newMessagesSchema := mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"after_id":{"type":"string"},"after_ts":{"type":"string"},"limit":{"type":"integer","maximum":2000}`, `"project_id","room_id"`)

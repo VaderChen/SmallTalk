@@ -1,5 +1,5 @@
-github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.20 h1:jD45Ufocp/flBVKQXnKC1FKPX5/ZIUv7/jQEYcAtnho=
-github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.20/go.mod h1:CLo5QY0qJz8rcJoxcpA1+U6vsdmdtIvgTvv6OuWzaNg=
+github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.21 h1:oW8kKlhbsgM5GD5oZxAT2fgs8CUrXdJFLdIfpEv/sIM=
+github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.21/go.mod h1:CLo5QY0qJz8rcJoxcpA1+U6vsdmdtIvgTvv6OuWzaNg=
 github.com/andybalholm/brotli v1.2.1 h1:R+f5xP285VArJDRgowrfb9DqL18yVK0gKAW/F+eTWro=
 github.com/andybalholm/brotli v1.2.1/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

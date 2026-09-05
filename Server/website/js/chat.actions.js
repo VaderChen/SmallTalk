@@ -276,11 +276,15 @@
 
     async function enterNextLevel() {
       if (state.level === "menu") {
-        if (state.menuIndex === 2) {
+        if (menuItems[state.menuIndex]?.key === "p") {
+          await openAccountSettings();
+          return;
+        }
+        if (menuItems[state.menuIndex]?.key === "s") {
           await promptSearch("rooms");
           return;
         }
-        if (state.menuIndex === 3) {
+        if (menuItems[state.menuIndex]?.key === "F") {
           await promptSearch("messages");
           return;
         }
@@ -369,6 +373,13 @@
     }
 
     document.addEventListener("keydown", async (event) => {
+      if (document.getElementById("dlgAccount")?.open) return;
+      if (state.level === "menu" && !document.querySelector("dialog[open]") && menuItems.some(item => item.key === event.key)) {
+        event.preventDefault();
+        state.menuIndex = menuItems.findIndex(item => item.key === event.key);
+        await enterNextLevel();
+        return;
+      }
       if (dlgBoard.open) {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -517,6 +528,9 @@
     async function handleUIAction(action) {
       if (!action) return;
       switch (action) {
+        case "account-settings":
+          await openAccountSettings();
+          break;
         case "next":
           await enterNextLevel();
           break;
@@ -579,6 +593,7 @@
     });
 
     document.addEventListener("contextmenu", (event) => {
+      if (document.getElementById("dlgAccount")?.open) return;
       event.preventDefault();
 
       // 如果點擊的是滑鼠左鍵可互動或點擊的項目，則不觸發返回
@@ -621,7 +636,7 @@
         (dlgArticle && dlgArticle.open) ||
         (dlgReply && dlgReply.open) ||
         (dlgSearch && dlgSearch.open) ||
-        (dlgConfirm && dlgConfirm.open)
+        (dlgConfirm && dlgConfirm.open) || document.getElementById("dlgAccount")?.open
       ) {
         return;
       }
@@ -664,7 +679,7 @@
         (dlgArticle && dlgArticle.open) ||
         (dlgReply && dlgReply.open) ||
         (dlgSearch && dlgSearch.open) ||
-        (dlgConfirm && dlgConfirm.open)
+        (dlgConfirm && dlgConfirm.open) || document.getElementById("dlgAccount")?.open
       ) {
         return;
       }
@@ -684,7 +699,7 @@
         (dlgArticle && dlgArticle.open) ||
         (dlgReply && dlgReply.open) ||
         (dlgSearch && dlgSearch.open) ||
-        (dlgConfirm && dlgConfirm.open)
+        (dlgConfirm && dlgConfirm.open) || document.getElementById("dlgAccount")?.open
       ) {
         return;
       }
@@ -728,7 +743,7 @@
         (dlgArticle && dlgArticle.open) ||
         (dlgReply && dlgReply.open) ||
         (dlgSearch && dlgSearch.open) ||
-        (dlgConfirm && dlgConfirm.open)
+        (dlgConfirm && dlgConfirm.open) || document.getElementById("dlgAccount")?.open
       ) {
         return;
       }

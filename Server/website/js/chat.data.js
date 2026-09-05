@@ -139,6 +139,7 @@
         item.replyToMessageID,
         item.ts,
         item.title,
+        item.author,
         item.body
       ].join("\u0001")).join("\u0002");
     }

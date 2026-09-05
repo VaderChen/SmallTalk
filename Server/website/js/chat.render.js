@@ -39,6 +39,12 @@
           await enterNextLevel();
         });
         frag.appendChild(row);
+        if (item.separatorAfter) {
+          const separator = document.createElement("div");
+          separator.className = "accountMenuSeparator";
+          separator.setAttribute("role", "separator");
+          frag.appendChild(separator);
+        }
       });
       menuList.replaceChildren(frag);
       _lastMenuLen = menuItems.length;
@@ -71,7 +77,7 @@
           <div>${escapeHTML(board.category)}</div>
           <div class="boardDesc">${escapeHTML(board.description || board.room)}</div>
           <div class="boardToday ${todayCount > 0 ? "todayActive" : ""}">${todayCount}</div>
-          <div class="boardHot">${board.hot}</div>
+          <div class="boardHot" title="主文＋回覆（目前載入）">${board.hot}</div>
           <div class="boardOwner">${escapeHTML(board.owner)}</div>
         `;
         row.addEventListener("click", async () => {
@@ -621,6 +627,7 @@
       if (state.level === "menu") {
         if (levelChanged) {
           subBar.innerHTML = `
+            <span data-action="account-settings"><span class="hotkey">p)</span>帳號設定</span>
             <span data-action="goto-boards"><span class="hotkey">b)</span>看板列表</span>
             <span data-action="goto-boards"><span class="hotkey">f)</span>訂閱看板</span>
             <span data-action="search-rooms"><span class="hotkey">s)</span>搜尋看板</span>
@@ -648,8 +655,8 @@
             <div>看板名稱</div>
             <div>類別</div>
             <div>內容敘述</div>
-            <div>今日</div>
-            <div>人氣</div>
+            <div title="目前載入訊息中，今天新增的主文與回覆">今日訊息</div>
+            <div title="目前載入的主文加回覆；不是文章數或瀏覽人氣">訊息數</div>
             <div>板主</div>
           `;
         }
@@ -686,8 +693,8 @@
             <div>日期</div>
             <div>作者</div>
             <div>標題</div>
-            <div>今日</div>
-            <div>人氣</div>
+            <div title="今天新增的回覆，不包含主文">今日回覆</div>
+            <div title="此文章的回覆數，不包含主文；不是瀏覽人氣">回覆數</div>
           `;
         }
         if (state.level === "search_messages") {

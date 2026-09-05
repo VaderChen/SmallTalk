@@ -11,6 +11,8 @@ import (
 )
 
 type AgentRegistryEntry struct {
+	RenamedAt      string         `json:"renamed_at,omitempty"`
+	NameHistory    []NameChange   `json:"name_history,omitempty"`
 	ClientID       string         `json:"client_id"`
 	DisplayName    string         `json:"display_name,omitempty"`
 	MACAddress     string         `json:"mac_address,omitempty"`
@@ -42,6 +44,8 @@ type AgentRegistryUpsert struct {
 }
 
 type agentRegistryDiskEntry struct {
+	RenamedAt      string         `json:"renamed_at,omitempty"`
+	NameHistory    []NameChange   `json:"name_history,omitempty"`
 	DisplayName    string         `json:"display_name,omitempty"`
 	MACAddress     string         `json:"mac_address,omitempty"`
 	RegisteredAt   string         `json:"registered_at"`
@@ -100,6 +104,8 @@ func (s *Store) LoadRegistry() error {
 		s.agentRegistry[clientID] = &AgentRegistryEntry{
 			ClientID:       clientID,
 			DisplayName:    strings.TrimSpace(item.DisplayName),
+			RenamedAt:      item.RenamedAt,
+			NameHistory:    append([]NameChange(nil), item.NameHistory...),
 			MACAddress:     normalizeMACAddress(item.MACAddress),
 			RegisteredAt:   strings.TrimSpace(item.RegisteredAt),
 			LastSeenAt:     strings.TrimSpace(item.LastSeenAt),
@@ -123,6 +129,12 @@ func (s *Store) LoadRegistry() error {
 
 func (s *Store) SaveRegistry() error {
 	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.saveRegistryLocked()
+}
+
+// 呼叫端持有 Registry 鎖，避免名稱檢查與保存之間被其他請求插入。
+func (s *Store) saveRegistryLocked() error {
 	disk := make(map[string]agentRegistryDiskEntry, len(s.agentRegistry))
 	for clientID, item := range s.agentRegistry {
 		if item == nil {
@@ -130,6 +142,8 @@ func (s *Store) SaveRegistry() error {
 		}
 		disk[clientID] = agentRegistryDiskEntry{
 			DisplayName:    item.DisplayName,
+			RenamedAt:      item.RenamedAt,
+			NameHistory:    append([]NameChange(nil), item.NameHistory...),
 			MACAddress:     item.MACAddress,
 			RegisteredAt:   item.RegisteredAt,
 			LastSeenAt:     item.LastSeenAt,
@@ -147,23 +161,19 @@ func (s *Store) SaveRegistry() error {
 			Meta:           cloneMeta(item.Meta),
 		}
 	}
-	s.mu.RUnlock()
 
 	b, err := json.MarshalIndent(disk, "", "  ")
 	if err != nil {
 		return err
 	}
 	if s.pg != nil {
-		s.mu.RLock()
 		for _, item := range s.agentRegistry {
 			if item != nil {
 				if err := s.pg.SaveAgentRegistryEntry(item); err != nil {
-					s.mu.RUnlock()
 					return err
 				}
 			}
 		}
-		s.mu.RUnlock()
 	}
 	if s.dataDir == "" {
 		return nil
@@ -194,7 +204,7 @@ func (s *Store) UpsertAgentRegistry(in AgentRegistryUpsert) (AgentRegistryEntry,
 			if otherEntry == nil || otherID == clientID {
 				continue
 			}
-			if strings.EqualFold(strings.TrimSpace(otherEntry.DisplayName), newDisplayName) {
+			if profileNameKey(otherEntry.DisplayName) == profileNameKey(newDisplayName) {
 				s.mu.Unlock()
 				return AgentRegistryEntry{}, fmt.Errorf("【名稱重複衝突】顯示名稱 '%s' 已經被其他帳號 (%s) 使用，無法使用或更改為此名稱", newDisplayName, otherID)
 			}
@@ -202,6 +212,25 @@ func (s *Store) UpsertAgentRegistry(in AgentRegistryUpsert) (AgentRegistryEntry,
 	}
 
 	entry, ok := s.agentRegistry[clientID]
+	var previous *AgentRegistryEntry
+	if ok {
+		cp := *entry
+		cp.NameHistory = append([]NameChange(nil), entry.NameHistory...)
+		cp.Meta = cloneMeta(entry.Meta)
+		previous = &cp
+	}
+	if ok && newDisplayName != "" && newDisplayName != entry.DisplayName {
+		if err := validateProfileName(newDisplayName); err != nil {
+			s.mu.Unlock()
+			return AgentRegistryEntry{}, err
+		}
+		if err := checkRenameCooldown(entry, now); err != nil {
+			s.mu.Unlock()
+			return AgentRegistryEntry{}, err
+		}
+		entry.NameHistory = append(append([]NameChange(nil), entry.NameHistory...), NameChange{OldName: entry.DisplayName, NewName: newDisplayName, ChangedAt: now.Format(time.RFC3339Nano)})
+		entry.RenamedAt = now.Format(time.RFC3339Nano)
+	}
 	if !ok || entry == nil {
 		entry = &AgentRegistryEntry{
 			ClientID:     clientID,
@@ -235,9 +264,25 @@ func (s *Store) UpsertAgentRegistry(in AgentRegistryUpsert) (AgentRegistryEntry,
 	if entry.Meta != nil {
 		out.Meta = cloneMeta(entry.Meta)
 	}
+	var persistErr error
+	if previous != nil && previous.DisplayName != entry.DisplayName {
+		persistErr = s.persistProfileRenameLocked(entry, previous)
+	} else if s.pg != nil {
+		persistErr = s.pg.SaveAgentRegistryEntry(entry)
+	} else {
+		persistErr = s.saveRegistryLocked()
+	}
+	if err := persistErr; err != nil {
+		if previous != nil {
+			s.agentRegistry[clientID] = previous
+		} else {
+			delete(s.agentRegistry, clientID)
+		}
+		s.mu.Unlock()
+		return AgentRegistryEntry{}, err
+	}
 	s.mu.Unlock()
-
-	return out, s.SaveRegistry()
+	return out, nil
 }
 
 func (s *Store) SetAgentIssuedToken(clientID, token string, issuedAt, expiresAt time.Time) (AgentRegistryEntry, error) {
@@ -622,49 +667,6 @@ func (s *Store) ListAgentRegistryRedacted() []AgentRegistryEntry {
 	return items
 }
 
-func (s *Store) saveRegistryLocked() error {
-	disk := make(map[string]agentRegistryDiskEntry, len(s.agentRegistry))
-	for clientID, item := range s.agentRegistry {
-		if item == nil {
-			continue
-		}
-		disk[clientID] = agentRegistryDiskEntry{
-			DisplayName:    item.DisplayName,
-			MACAddress:     item.MACAddress,
-			RegisteredAt:   item.RegisteredAt,
-			LastSeenAt:     item.LastSeenAt,
-			Approved:       item.Approved,
-			ApprovedAt:     item.ApprovedAt,
-			Blocked:        item.Blocked,
-			BlockedAt:      item.BlockedAt,
-			TokenIssuedAt:  item.TokenIssuedAt,
-			TokenExpiresAt: item.TokenExpiresAt,
-			Token:          item.Token,
-			ReadOnly:       item.ReadOnly,
-			ReadOnlyAt:     item.ReadOnlyAt,
-			Meta:           cloneMeta(item.Meta),
-		}
-	}
-
-	b, err := json.MarshalIndent(disk, "", "  ")
-	if err != nil {
-		return err
-	}
-	if s.pg != nil {
-		for _, item := range s.agentRegistry {
-			if item != nil {
-				if err := s.pg.SaveAgentRegistryEntry(item); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	if s.dataDir == "" {
-		return nil
-	}
-	return writePrivateFile(s.registryPath(), b)
-}
-
 func (s *Store) FindAgentRegistryByMAC(macAddress string) (AgentRegistryEntry, bool) {
 	macAddress = normalizeMACAddress(macAddress)
 	if macAddress == "" {
@@ -697,6 +699,7 @@ func (s *Store) GetAgentRegistry(clientID string) (AgentRegistryEntry, bool) {
 		return AgentRegistryEntry{}, false
 	}
 	cp := *item
+	cp.NameHistory = append([]NameChange(nil), item.NameHistory...)
 	if item.Meta != nil {
 		cp.Meta = cloneMeta(item.Meta)
 	}

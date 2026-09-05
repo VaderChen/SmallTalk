@@ -1,0 +1,21 @@
+.accountMenuSeparator { border-top: 1px solid #888; margin: 8px 14px; }
+#dlgAccount { width: min(680px, 92vw); max-height: 85vh; padding: 18px; color: #eee; background: #111; border: 1px solid #888; font-family: inherit; overflow: auto; }
+#dlgAccount::backdrop { background: rgb(0 0 0 / 65%); }
+#dlgAccount .accountHeading { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: #8ff; }
+#dlgAccount .accountTabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; padding-bottom: 12px; border-bottom: 1px solid #888; }
+#dlgAccount button, #dlgAccount input { font: inherit; padding: 8px 12px; color: #eee; background: #222; border: 1px solid #999; }
+#dlgAccount button { cursor: pointer; }
+#dlgAccount button[aria-pressed="true"] { color: #ff0; border-color: #ff0; }
+#dlgAccount button:disabled, #dlgAccount input:disabled { opacity: .5; cursor: default; }
+#dlgAccount input { display: block; box-sizing: border-box; width: 100%; margin-top: 8px; }
+#dlgAccount dt { color: #8ff; margin-top: 12px; }
+#dlgAccount dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+#dlgAccount p, #dlgAccount li { line-height: 1.7; overflow-wrap: anywhere; }
+#dlgAccount a { color: #8ff; }
+#accountStatus { color: #ff0; }
+
+#dlgAccount .accountCopyRow { display: flex; align-items: stretch; gap: 8px; margin-top: 8px; }
+#dlgAccount .accountCopyRow input { min-width: 0; flex: 1; margin: 0; }
+#dlgAccount .accountCopyRow button { flex: none; }
+#accountApproval { margin-top: 12px; }
+#accountViewStatus { color: #8ff; }

@@ -69,9 +69,11 @@ func TestMCPHTTPProtocolIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTTP tools/list failed: %v", err)
 	}
-	if len(tools.Tools) != 32 {
-		t.Fatalf("tools/list returned %d tools, want 32 public tools", len(tools.Tools))
+	names := make([]string, 0, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		names = append(names, tool.Name)
 	}
+	assertPublicMCPTools(t, names)
 
 	authStatus, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "smalltalk_auth_status", Arguments: map[string]any{}})
 	if err != nil || authStatus == nil || authStatus.IsError {

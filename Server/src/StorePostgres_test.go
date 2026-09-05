@@ -9,12 +9,8 @@ import (
 )
 
 func TestPostgresPerBoardTableIntegration(t *testing.T) {
-	pg, err := ConnectLocalPostgres()
-	if err != nil {
-		t.Skipf("Skipping Postgres integration test: %v", err)
-		return
-	}
-	defer pg.Close()
+	pg := isolatedPostgresForTest(t)
+	var err error
 
 	testRoomID := fmt.Sprintf("test_board_%d", time.Now().UnixNano()%100000)
 	tableName, err := pg.EnsureBoardTable("default", testRoomID)
@@ -100,11 +96,8 @@ func TestPostgresPerBoardTableIntegration(t *testing.T) {
 }
 
 func TestPostgresHardDeleteAndBoardDeleteAreDurable(t *testing.T) {
-	pg, err := ConnectLocalPostgres()
-	if err != nil {
-		t.Skipf("Skipping Postgres integration test: %v", err)
-	}
-	defer pg.Close()
+	pg := isolatedPostgresForTest(t)
+	var err error
 	roomID := fmt.Sprintf("flow_delete_%d", time.Now().UnixNano()%100000000)
 	defer pg.DeleteBoard("default", roomID)
 	store, err := NewStoreWithPostgres(pg, 200)
@@ -152,12 +145,8 @@ func TestPostgresHardDeleteAndBoardDeleteAreDurable(t *testing.T) {
 }
 
 func TestStoreWithPostgresSync(t *testing.T) {
-	pg, err := ConnectLocalPostgres()
-	if err != nil {
-		t.Skipf("Skipping Postgres test: %v", err)
-		return
-	}
-	defer pg.Close()
+	pg := isolatedPostgresForTest(t)
+	var err error
 
 	tempDir, err := os.MkdirTemp("", "st_pg_test_*")
 	if err != nil {
@@ -242,41 +231,46 @@ func TestStoreWithPostgresSync(t *testing.T) {
 }
 
 func TestImportRemoteDataToLocalPostgres(t *testing.T) {
-	pg, err := ConnectLocalPostgres()
+	pg := isolatedPostgresForTest(t)
+	dataDir := t.TempDir()
+	source, err := NewStoreWithError(dataDir, 200, true)
 	if err != nil {
-		t.Fatalf("Failed to connect local postgres: %v", err)
+		t.Fatal(err)
 	}
-	defer pg.Close()
-
-	dataDir := "../data"
-	store, err := NewStoreWithError(dataDir, 2000, true)
+	if _, err := source.CreateRoom("default", "import_fixture", "匯入測試", "測試", "", "system"); err != nil {
+		t.Fatal(err)
+	}
+	msg := Message{ID: "import-root", ArticleID: "import-root", ProjectID: "default", RoomID: "import_fixture", AgentID: "import-author", DisplayName: "匯入作者", Title: "匯入文章", Text: "隔離資料", TS: time.Now()}
+	if err := source.AddMessage(msg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.UpsertAgentRegistry(AgentRegistryUpsert{ClientID: "import-author", DisplayName: "匯入作者"}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := NewStoreWithError(dataDir, 200, true)
 	if err != nil {
-		t.Fatalf("Failed to load store from %s: %v", dataDir, err)
+		t.Fatal(err)
 	}
-
-	if err := store.SetPostgres(pg); err != nil {
-		t.Fatalf("Failed to sync store to Postgres: %v", err)
+	if err := loaded.SetPostgres(pg); err != nil {
+		t.Fatal(err)
 	}
-
-	boards, err := pg.LoadAllBoards()
+	messages, err := pg.LoadMessagesForRoom("default", "import_fixture", 100)
+	if err != nil || len(messages) != 1 || messages[0].Text != msg.Text {
+		t.Fatalf("匯入文章不符: count=%d err=%v", len(messages), err)
+	}
+	registry, err := pg.LoadAllAgentRegistry()
 	if err != nil {
-		t.Fatalf("LoadAllBoards failed: %v", err)
+		t.Fatal(err)
 	}
-	t.Logf("Total boards in Postgres: %d", len(boards))
-	for _, b := range boards {
-		tblName := pg.SanitizeTableName(b.ProjectID, b.RoomID)
-		var cnt int
-		_ = pg.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s;", tblName)).Scan(&cnt)
-		t.Logf("Board [%s] %s -> Table %s (rows: %d)", b.RoomID, b.Name, tblName, cnt)
+	if entry := registry["import-author"]; entry == nil || entry.DisplayName != "匯入作者" {
+		t.Fatal("未匯入自建帳號")
 	}
 }
 
 func TestNewStoreWithPostgresPureSQL(t *testing.T) {
-	pg, err := ConnectLocalPostgres()
-	if err != nil {
-		t.Fatalf("Failed to connect local postgres: %v", err)
-	}
-	defer pg.Close()
+	pg := isolatedPostgresForTest(t)
+	var err error
+	seedPostgresArticle(t, pg)
 
 	// Initialize Store purely from PostgreSQL (no dataDir, no reading disk files)
 	store, err := NewStoreWithPostgres(pg, 200)
@@ -288,28 +282,34 @@ func TestNewStoreWithPostgresPureSQL(t *testing.T) {
 		t.Errorf("Expected persistToDisk to be false for pure PostgreSQL mode")
 	}
 
-	// Verify all 18 boards exist in memory from SQL
+	// 確認自行建立的看板從 SQL 載入。
 	boards := store.ListAllRooms(time.Now())
-	if len(boards) < 18 {
-		t.Fatalf("Expected at least 18 boards from PostgreSQL, got %d", len(boards))
+	found := false
+	for _, board := range boards {
+		if board.RoomID == "sql_fixture" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("未從 SQL 載入測試看板")
 	}
 
-	// Verify sexy board
-	articles, err := store.ListArticles("default", "sexy", ArticleRangeOptions{Limit: 10})
+	// Verify sql_fixture board
+	articles, err := store.ListArticles("default", "sql_fixture", ArticleRangeOptions{Limit: 10})
 	if err != nil {
-		t.Fatalf("ListArticles for sexy failed: %v", err)
+		t.Fatalf("ListArticles for sql_fixture failed: %v", err)
 	}
 	if len(articles) == 0 {
-		t.Fatalf("Expected at least 1 article in sexy board from PostgreSQL")
+		t.Fatalf("Expected at least 1 article in sql_fixture board from PostgreSQL")
 	}
-	t.Logf("Sexy board article: %s by %s", articles[0].Title, articles[0].Author)
+	t.Logf("SQL fixture board article: %s by %s", articles[0].Title, articles[0].Author)
 
-	// Add a message and verify it writes directly to PostgreSQL table board_sexy
+	// Add a message and verify it writes directly to PostgreSQL table board_sql_fixture
 	newMsg := Message{
 		ID:               fmt.Sprintf("test_sql_only_%d", time.Now().UnixNano()),
 		ProjectID:        "default",
-		RoomID:           "sexy",
-		Board:            "sexy",
+		RoomID:           "sql_fixture",
+		Board:            "sql_fixture",
 		AgentID:          "antigravity_tester",
 		DisplayName:      "SQL 專用測試員",
 		ArticleID:        articles[0].ArticleID,
@@ -324,9 +324,9 @@ func TestNewStoreWithPostgresPureSQL(t *testing.T) {
 
 	// Verify in PostgreSQL table directly
 	var dbText string
-	err = pg.db.QueryRow(fmt.Sprintf("SELECT text FROM board_sexy WHERE id = '%s';", newMsg.ID)).Scan(&dbText)
+	err = pg.db.QueryRow(fmt.Sprintf("SELECT text FROM board_sql_fixture WHERE id = '%s';", newMsg.ID)).Scan(&dbText)
 	if err != nil {
-		t.Fatalf("Failed to query board_sexy in PostgreSQL: %v", err)
+		t.Fatalf("Failed to query board_sql_fixture in PostgreSQL: %v", err)
 	}
 	if dbText != newMsg.Text {
 		t.Fatalf("Expected text %s, got %s", newMsg.Text, dbText)
@@ -334,25 +334,42 @@ func TestNewStoreWithPostgresPureSQL(t *testing.T) {
 }
 
 func TestAuthorizeAuthTokenAgentKindAndPostgres(t *testing.T) {
-	pg, err := ConnectLocalPostgres()
-	if err != nil {
-		t.Fatalf("Failed to connect local postgres: %v", err)
-	}
-	defer pg.Close()
-
+	pg := isolatedPostgresForTest(t)
 	store, err := NewStoreWithPostgres(pg, 200)
 	if err != nil {
-		t.Fatalf("NewStoreWithPostgres failed: %v", err)
+		t.Fatal(err)
 	}
-
-	req, _ := http.NewRequest("POST", "http://127.0.0.1:18792/mcp", nil)
-	req.Header.Set("Authorization", "Bearer antigravity_master_token_2026_sexy")
+	const clientID = "isolated-auth-agent"
+	token, err := viewRandom()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAgentRegistry(AgentRegistryUpsert{ClientID: clientID, DisplayName: "隔離認證帳號"}); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	entry := store.agentRegistry[clientID]
+	entry.Approved = true
+	entry.Token = token
+	store.mu.Unlock()
+	if err := store.SaveRegistry(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAuthToken(AuthTokenRecord{Token: token, ClientID: clientID, Kind: "agent", IssuedAt: time.Now().Format(time.RFC3339Nano), ExpiresAt: time.Now().Add(time.Hour).Format(time.RFC3339Nano)}, false); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := NewStoreWithPostgres(pg, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest("POST", "http://127.0.0.1/mcp", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.RemoteAddr = "127.0.0.1:55432"
-	ctx, ok := requireAuthorizedRequest(req, nil, store)
+	ctx, ok := requireAuthorizedRequest(req, nil, reloaded)
 	if !ok {
-		t.Fatalf("requireAuthorizedRequest failed")
+		t.Fatal("PostgreSQL 重載後認證失敗")
 	}
-	if ctx.ClientID != "antigravity_pilot_01" || ctx.PrincipalType != "agent" {
-		t.Fatalf("Unexpected context: %+v", ctx)
+	if ctx.ClientID != clientID || ctx.PrincipalType != "agent" {
+		t.Fatal("認證身分不符")
 	}
 }

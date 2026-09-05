@@ -17,6 +17,7 @@ import (
 )
 
 type articleAccumulator struct {
+	AgentID       string
 	ProjectID     string
 	RoomID        string
 	Board         string
@@ -172,6 +173,8 @@ type Message struct {
 	Text             string         `json:"text"`
 	TS               time.Time      `json:"ts"`
 	Meta             map[string]any `json:"meta,omitempty"`
+
+	OriginalDisplayName string `json:"original_display_name,omitempty"`
 }
 
 var (
@@ -2691,6 +2694,7 @@ func (s *Store) ListArticles(projectID, roomID string, opts ArticleRangeOptions)
 				ArticleID:     articleID,
 				Title:         strings.TrimSpace(msg.Title),
 				Author:        firstNonEmpty(msg.DisplayName, msg.Author, msg.AgentID),
+				AgentID:       msg.AgentID,
 				RootMessageID: strings.TrimSpace(msg.ID),
 				StartedAt:     msg.TS,
 				UpdatedAt:     msg.TS,
@@ -2746,6 +2750,7 @@ func (s *Store) ListArticles(projectID, roomID string, opts ArticleRangeOptions)
 			Article:       acc.ArticleID,
 			Title:         acc.Title,
 			Author:        acc.Author,
+			AgentID:       acc.AgentID,
 			RootMessageID: acc.RootMessageID,
 			RootMessage:   acc.RootMessageID,
 			StartedTS:     acc.StartedAt.Format(time.RFC3339Nano),
@@ -2886,6 +2891,7 @@ func (s *Store) GetArticle(projectID, roomID, articleID string) (*ArticleSummary
 		Article:       target,
 		Title:         title,
 		Author:        firstNonEmpty(rootMsg.DisplayName, rootMsg.Author, rootMsg.AgentID),
+		AgentID:       rootMsg.AgentID,
 		Body:          rootMsg.Text,
 		RootMessageID: rootMsg.ID,
 		RootMessage:   rootMsg.ID,
@@ -3024,7 +3030,7 @@ func (s *Store) ListArticlesByAuthorForClient(clientID, authorID string, limit i
 	for _, snapshot := range s.historySnapshotsForClient(clientID) {
 		articles := s.buildArticleSummariesFromMessages(snapshot.ProjectID, snapshot.RoomID, snapshot.Messages, true)
 		for _, article := range articles {
-			if normalizeAuthorIdentity(article.Author) != authorKey {
+			if normalizeAuthorIdentity(firstNonEmpty(article.AgentID, article.Author)) != authorKey {
 				continue
 			}
 			out = append(out, article)
@@ -3227,6 +3233,7 @@ func (s *Store) buildArticleSummariesFromMessages(projectID, roomID string, mess
 				ArticleID:     articleID,
 				Title:         strings.TrimSpace(msg.Title),
 				Author:        authorName,
+				AgentID:       msg.AgentID,
 				RootMessageID: strings.TrimSpace(msg.ID),
 				StartedAt:     msg.TS,
 				UpdatedAt:     msg.TS,
@@ -3270,6 +3277,7 @@ func (s *Store) buildArticleSummariesFromMessages(projectID, roomID string, mess
 			Article:       acc.ArticleID,
 			Title:         acc.Title,
 			Author:        acc.Author,
+			AgentID:       acc.AgentID,
 			RootMessageID: acc.RootMessageID,
 			RootMessage:   acc.RootMessageID,
 			StartedTS:     acc.StartedAt.Format(time.RFC3339Nano),

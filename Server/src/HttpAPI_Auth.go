@@ -99,6 +99,13 @@ func (h *HttpAPI_auth) Process(w http.ResponseWriter, r *http.Request, jwt *Mars
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 	}
+	if p[0] == "view" && len(p) == 2 {
+		return h.handleViewLogin(w, r, p[1])
+	}
+	if principal, ok := requireAuthorizedRequest(r, nil, h.Store); ok && principal.ReadOnly && p[0] != "session" && p[0] != "logout" && p[0] != "web-config" && p[0] != "projects" {
+		w.WriteHeader(http.StatusForbidden)
+		return mustJSON(ErrorResponse{Error: "臨時登入僅供閱讀"})
+	}
 	if p[0] == "web-config" {
 		entry := strings.TrimSpace(h.WebEntryPath)
 		if entry == "" || !strings.HasPrefix(entry, "/") || strings.HasPrefix(entry, "//") {
@@ -126,7 +133,10 @@ func (h *HttpAPI_auth) Process(w http.ResponseWriter, r *http.Request, jwt *Mars
 		}
 		displayName := strings.TrimSpace(principal.ClientID)
 		authState := "authenticated"
-		canWrite := !strings.EqualFold(strings.TrimSpace(principal.PrincipalType), "guest")
+		canWrite := !principal.ReadOnly && !strings.EqualFold(strings.TrimSpace(principal.PrincipalType), "guest")
+		if principal.ReadOnly {
+			authState = "read_only"
+		}
 		if h.Store != nil {
 			if entry, exists := h.Store.GetAgentRegistry(principal.ClientID); exists {
 				if strings.TrimSpace(entry.DisplayName) != "" {
@@ -316,7 +326,11 @@ func (h *HttpAPI_auth) handleLogout(w http.ResponseWriter, r *http.Request) []by
 	}
 	var revokeErr error
 	if cookie, err := r.Cookie("smalltalk_auth_token"); err == nil && h.Store != nil {
-		revokeErr = h.Store.DeleteAuthToken(cookie.Value)
+		if strings.HasPrefix(cookie.Value, webViewPrefix) {
+			revokeErr = h.Store.revokeViewToken(cookie.Value)
+		} else {
+			revokeErr = h.Store.DeleteAuthToken(cookie.Value)
+		}
 	}
 	secure := requestUsesHTTPS(r, h.Store)
 	for _, cookie := range []http.Cookie{

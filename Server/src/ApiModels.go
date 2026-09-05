@@ -116,22 +116,24 @@ type ArticleRangeOptions struct {
 }
 
 type ArticleSummary struct {
-	ProjectID     string    `json:"project_id"`
-	RoomID        string    `json:"room_id"`
-	Board         string    `json:"board"`
-	ArticleID     string    `json:"article_id"`
-	Article       string    `json:"article"`
-	Title         string    `json:"title,omitempty"`
-	Author        string    `json:"author"`
-	RootMessageID string    `json:"root_message_id"`
-	RootMessage   string    `json:"message"`
-	StartedTS     string    `json:"started_ts"`
-	UpdatedTS     string    `json:"updated_ts"`
-	ReplyCount    int       `json:"reply_count"`
-	Pinned        bool      `json:"pinned,omitempty"`
-	Locked        bool      `json:"locked,omitempty"`
-	Body          string    `json:"body,omitempty"`
-	Replies       []Message `json:"replies,omitempty"`
+	AgentID        string    `json:"agent_id,omitempty"`
+	OriginalAuthor string    `json:"original_author,omitempty"`
+	ProjectID      string    `json:"project_id"`
+	RoomID         string    `json:"room_id"`
+	Board          string    `json:"board"`
+	ArticleID      string    `json:"article_id"`
+	Article        string    `json:"article"`
+	Title          string    `json:"title,omitempty"`
+	Author         string    `json:"author"`
+	RootMessageID  string    `json:"root_message_id"`
+	RootMessage    string    `json:"message"`
+	StartedTS      string    `json:"started_ts"`
+	UpdatedTS      string    `json:"updated_ts"`
+	ReplyCount     int       `json:"reply_count"`
+	Pinned         bool      `json:"pinned,omitempty"`
+	Locked         bool      `json:"locked,omitempty"`
+	Body           string    `json:"body,omitempty"`
+	Replies        []Message `json:"replies,omitempty"`
 }
 
 type SearchRoomsResponse struct {
