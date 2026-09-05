@@ -291,9 +291,12 @@ func (h *HttpAPI_auth) handleViewLogin(w http.ResponseWriter, r *http.Request, a
 		http.SetCookie(w, &http.Cookie{Name: webViewCookie, Value: token, Path: "/auth/view", HttpOnly: true, Secure: requestUsesHTTPS(r, h.Store), SameSite: http.SameSiteStrictMode, MaxAge: 86400})
 		return mustJSON(map[string]any{"ok": true, "request_id": record.ID, "expires_at": record.ExpiresAt.Format(time.RFC3339)})
 	}
-	if action == "poll" {
+	if action == "poll" || action == "resume" {
 		cookie, err := r.Cookie(webViewCookie)
 		if err != nil {
+			if action == "resume" {
+				return mustJSON(map[string]any{"ok": true, "status": "idle"})
+			}
 			return mustJSON(ErrorResponse{Error: "請先產生授權連結"})
 		}
 		record, err := h.Store.pollViewRequest(cookie.Value)
@@ -301,7 +304,7 @@ func (h *HttpAPI_auth) handleViewLogin(w http.ResponseWriter, r *http.Request, a
 			return mustJSON(ErrorResponse{Error: err.Error()})
 		}
 		if !record.Activated {
-			return mustJSON(map[string]any{"ok": true, "status": "pending"})
+			return mustJSON(map[string]any{"ok": true, "status": "pending", "request_id": record.ID, "expires_at": record.ExpiresAt.Format(time.RFC3339)})
 		}
 		remaining := int(time.Until(record.ExpiresAt).Seconds())
 		if remaining < 1 {

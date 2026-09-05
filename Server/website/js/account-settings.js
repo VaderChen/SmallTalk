@@ -19,17 +19,25 @@
     if (!response.ok || data.error) throw new Error(data.error || '請稍後再試');
     return data;
   }
-  async function pollView(current) {
+  async function pollView(current, resume = false) {
     if (!dialog.open || current !== viewRevision) return;
     try {
-      const data = await viewRequest('poll');
+      const data = await viewRequest(resume ? 'resume' : 'poll');
       if (current !== viewRevision || !dialog.open) return;
+      if (data.status === 'idle') {
+        document.getElementById('accountApproval').hidden = true; approvalURL.value = ''; viewStatus.textContent = '';
+        return;
+      }
       if (data.status === 'approved') {
         stopViewPoll(); client.resetSession(); document.getElementById('accountApproval').hidden = true;
         await load(); return;
       }
+      if (data.status !== 'pending' || !data.request_id) throw new Error('授權狀態無法確認');
+      approvalURL.value = `${location.origin}/agent-view.html#request=${encodeURIComponent(data.request_id)}`;
+      document.getElementById('accountApproval').hidden = false;
+      if (resume) viewStatus.textContent = '已接續先前的授權請求，等待 Agent 核准；不必重新產生連結。';
       viewTimer = setTimeout(() => pollView(current), 3000);
-    } catch (error) { if (current === viewRevision) viewStatus.textContent = `${error.message}。可重新產生授權連結。`; }
+    } catch (error) { if (current === viewRevision) { document.getElementById('accountApproval').hidden = true; approvalURL.value = ''; viewStatus.textContent = `${error.message}。可重新產生授權連結。`; } }
   }
   requestButton.addEventListener('click', async () => {
     stopViewPoll(); const current = viewRevision; requestButton.disabled = true;
@@ -53,6 +61,16 @@
     dialog.querySelectorAll('[data-account-panel]').forEach(el => { el.hidden = el.dataset.accountPanel !== name; });
     dialog.querySelectorAll('[data-account-tab]').forEach(el => el.setAttribute('aria-pressed', String(el.dataset.accountTab === name)));
   }
+  function canRename() { return dialog.open && !busy && !!profile?.can_rename && !profile?.read_only; }
+  function clearProfile() {
+    profile = null;
+    document.getElementById('accountInfo').replaceChildren();
+    document.getElementById('accountHistory').replaceChildren();
+    input.value = ''; input.disabled = true; submit.disabled = true;
+    document.getElementById('accountNext').textContent = '';
+    document.getElementById('accountRenameForm').hidden = true;
+    document.getElementById('accountRenameAgent').hidden = false;
+  }
   function renderProfile(data) {
     profile = data;
     document.getElementById('accountRenameForm').hidden = !!data.read_only;
@@ -64,8 +82,8 @@
       const dd = document.createElement('dd'); dd.textContent = value; info.append(dt, dd);
     });
     input.value = data.display_name;
-    submit.disabled = busy || !data.can_rename;
-    input.disabled = busy || !data.can_rename;
+    submit.disabled = !canRename();
+    input.disabled = !canRename();
     document.getElementById('accountNext').textContent = data.can_rename ? '目前可以改名；名稱不可與其他帳號重複。' : data.next_rename_at ? `下次可改名：${date(data.next_rename_at)}` : '目前帳號無法改名。';
     const history = document.getElementById('accountHistory'); history.replaceChildren();
     (data.name_history || []).slice().reverse().forEach(change => {
@@ -75,6 +93,7 @@
   }
   async function load() {
     const current = ++revision;
+    clearProfile();
     status.textContent = '讀取帳號資料中…';
     submit.disabled = true; input.disabled = true;
     document.getElementById('accountLogin').hidden = true;
@@ -92,32 +111,32 @@
   }
   window.openAccountSettings = async () => {
     if (busy) return;
-    profile = null;
-    document.getElementById('accountInfo').replaceChildren();
-    document.getElementById('accountHistory').replaceChildren();
-    input.value = ''; document.getElementById('accountNext').textContent = '';
+    clearProfile();
     tab('info'); if (!dialog.open) dialog.showModal(); await load();
-    if (!document.getElementById('accountApproval').hidden && !document.getElementById('accountLogin').hidden) { stopViewPoll(); pollView(viewRevision); }
+    if (dialog.open && !document.getElementById('accountLogin').hidden) { stopViewPoll(); await pollView(viewRevision, true); }
   };
   document.getElementById('accountClose').addEventListener('click', () => dialog.close());
-  dialog.addEventListener('close', () => { ++revision; stopViewPoll(); });
+  dialog.addEventListener('close', () => { ++revision; stopViewPoll(); clearProfile(); });
   dialog.querySelectorAll('[data-account-tab]').forEach(el => el.addEventListener('click', () => tab(el.dataset.accountTab)));
   document.getElementById('accountRenameForm').addEventListener('submit', async event => {
-    event.preventDefault(); if (busy || !profile?.can_rename) return;
+    event.preventDefault(); if (!canRename()) return;
+    const submittingRevision = revision;
     const name = input.value.trim();
     if (!name || [...name].length > 80) { status.textContent = '名稱須為 1 至 80 個字元。'; return; }
     busy = true; submit.disabled = true; input.disabled = true; status.textContent = '正在儲存名稱…';
     try {
       const data = await client.call('smalltalk_update_profile', { display_name: name });
+      if (submittingRevision !== revision || !dialog.open) return;
       busy = false; renderProfile(data);
       document.cookie = `smalltalk_nickname=${encodeURIComponent(data.display_name)}; Path=/; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
       // 清除本頁舊顯示資料；後續載入由伺服器依帳號 ID 解析目前名稱。
       if (typeof threadCache !== 'undefined') Object.keys(threadCache).forEach(key => delete threadCache[key]);
       status.textContent = '名稱已更新。';
     } catch (error) {
+      if (submittingRevision !== revision || !dialog.open) return;
       const message = error.message;
       busy = false; await load();
       status.textContent = `未確認改名成功：${message}。請以目前帳號資料為準，勿反覆送出。`;
-    } finally { busy = false; submit.disabled = !profile?.can_rename; input.disabled = !profile?.can_rename; }
+    } finally { busy = false; submit.disabled = !canRename(); input.disabled = !canRename(); }
   });
 })();

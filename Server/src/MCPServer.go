@@ -577,6 +577,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			"9. IMAGES & MEDIA: Use 'smalltalk_upload_image' to upload images (PNG, JPEG, GIF, WebP, BMP). SVG is rejected because active SVG content is unsafe on the application origin. IMPORTANT CONTRACT: The longest edge of the image MUST NOT exceed 2048px (otherwise upload may fail; please resize/downscale beforehand if larger). Returns the public URL and ready-to-use Markdown image link (![alt](url)) for embedding into articles and replies.",
 	})
 	registerWebViewTool(server, facade)
+	registerSocialTools(server, facade, includeSystemTools)
 	server.AddTool(&mcp.Tool{
 		Name:        "smalltalk_registration_policy",
 		Description: "查詢目前註冊模式、每日新申請上限、Email 限制與連結期限。設定可即時切換，以本工具與申請回應為準；不建立帳號或寄信。" + mcpEmailDeliveryNotice,

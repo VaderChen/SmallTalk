@@ -202,6 +202,9 @@ func (pg *PostgresStore) initSystemSchema() error {
 	if _, err := pg.db.Exec(`CREATE TABLE IF NOT EXISTS browser_view_requests (id TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL, payload JSONB NOT NULL)`); err != nil {
 		return &ProfileSchemaError{Err: err}
 	}
+	if err := pg.initSocialSchema(); err != nil {
+		return &ProfileSchemaError{Err: err}
+	}
 	if err := pg.initProfileSchema(); err != nil {
 		return &ProfileSchemaError{err}
 	}

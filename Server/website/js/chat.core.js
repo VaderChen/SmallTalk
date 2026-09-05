@@ -25,7 +25,7 @@
 
     const state = {
       level: "menu",
-      menuIndex: 0,
+      menuIndex: Math.max(0, menuItems.findIndex(item => item.key === "b")),
       boardIndex: 0,
       threadIndex: 0,
       searchMode: "",

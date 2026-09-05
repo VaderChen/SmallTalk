@@ -102,7 +102,9 @@ func (h *HttpAPI_auth) Process(w http.ResponseWriter, r *http.Request, jwt *Mars
 	if p[0] == "view" && len(p) == 2 {
 		return h.handleViewLogin(w, r, p[1])
 	}
-	if principal, ok := requireAuthorizedRequest(r, nil, h.Store); ok && principal.ReadOnly && p[0] != "session" && p[0] != "logout" && p[0] != "web-config" && p[0] != "projects" {
+	principal, authenticated := requireAuthorizedRequest(r, nil, h.Store)
+	viewOnly := (authenticated && principal.ReadOnly) || (!authenticated && hasViewCredential(r))
+	if viewOnly && p[0] != "session" && p[0] != "logout" && p[0] != "web-config" && p[0] != "projects" {
 		w.WriteHeader(http.StatusForbidden)
 		return mustJSON(ErrorResponse{Error: "臨時登入僅供閱讀"})
 	}

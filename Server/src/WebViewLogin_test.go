@@ -66,6 +66,9 @@ func TestWebViewLocalHTTPSmoke(t *testing.T) {
 	if _, r := post("/auth/view/request", "https://other.invalid"); r.StatusCode != 403 {
 		t.Fatal("跨站建立未拒絕")
 	}
+	if data, _ := post("/auth/view/resume", server.URL); data["status"] != "idle" {
+		t.Fatal("未建立請求的恢復狀態不符", data)
+	}
 	data, _ := post("/auth/view/request", server.URL)
 	id, ok := data["request_id"].(string)
 	if !ok {
@@ -73,6 +76,11 @@ func TestWebViewLocalHTTPSmoke(t *testing.T) {
 	}
 	if data, _ := post("/auth/view/poll", server.URL); data["status"] != "pending" {
 		t.Fatal(data)
+	}
+	// 模擬重新整理後只保留 HttpOnly cookie，仍找回同一筆待核准請求。
+	resumed, _ := post("/auth/view/resume", server.URL)
+	if resumed["status"] != "pending" || resumed["request_id"] != id || resumed["expires_at"] != data["expires_at"] {
+		t.Fatal("恢復請求更換ID或延長期限", resumed)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -203,6 +211,11 @@ func TestWebViewLocalHTTPSmoke(t *testing.T) {
 	browser.Jar.SetCookies(u, []*http.Cookie{{Name: "smalltalk_auth_token", Value: viewToken, Path: "/"}})
 	if _, r := post("/api/boards/visitors/messages", server.URL); r.StatusCode != 403 {
 		t.Fatal("失效 session 退回訪客寫入")
+	}
+	for _, path := range []string{"/auth/login", "/auth/devRegister", "/auth/devLogin", "/auth/email/bind", "/auth/email/complete", "/auth/email/recovery"} {
+		if _, response := post(path, server.URL); response.StatusCode != http.StatusForbidden {
+			t.Fatalf("失效唯讀憑證進入 %s", path)
+		}
 	}
 	// 完整 Agent 的既有修改權限仍可用。
 	call(agent, "smalltalk_update_profile", map[string]any{"display_name": "唯讀授權測試更名"}, false)
