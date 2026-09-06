@@ -72,6 +72,7 @@ func TestAgentRoleOperations(t *testing.T) {
 		t.Fatal("should not be board moderator initially")
 	}
 
+	seedRoleEmail(t, store, clientID)
 	// 2. Set as admin and moderator of emei
 	if err := store.SetAgentRole(clientID, true, []string{"default/emei"}); err != nil {
 		t.Fatal(err)
@@ -114,6 +115,7 @@ func TestCreateRoomFullAndAdminAPI(t *testing.T) {
 		t.Fatalf("expected ErrAlreadyExists, got %v", err)
 	}
 
+	seedRoleEmail(t, store, "system")
 	// 3. Test Admin HTTP API /permissions/rooms/create
 	now := time.Now()
 	if _, err := store.UpsertAuthToken(AuthTokenRecord{

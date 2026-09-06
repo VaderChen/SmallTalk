@@ -202,6 +202,11 @@ func (s *SmallTalkFacade) EditArticle(clientID, projectID, roomID, messageID, ti
 }
 
 func (s *SmallTalkFacade) CreateRoom(clientID, projectID, roomID, name, category, description, owner string) (*Room, error) {
+	if s != nil && s.Store != nil {
+		if e := s.Store.requireBoardOwnerEmail(projectID, roomID, owner); e != nil {
+			return nil, e
+		}
+	}
 	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("store not available")
 	}
@@ -215,6 +220,11 @@ func (s *SmallTalkFacade) CreateRoom(clientID, projectID, roomID, name, category
 }
 
 func (s *SmallTalkFacade) UpdateRoom(clientID, projectID, roomID, name, category, description, owner string) (*Room, error) {
+	if s != nil && s.Store != nil {
+		if e := s.Store.requireBoardOwnerEmail(projectID, roomID, owner); e != nil {
+			return nil, e
+		}
+	}
 	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("store not available")
 	}

@@ -407,7 +407,8 @@
           </div>
           <div class="field settingSelectControl">
             <select id="registrationMode" aria-describedby="registrationModeHelp" disabled>
-              <option value="standard">標準模式（預設）</option>
+              <option value="open">開放模式（僅限可信任內網）</option>
+              <option value="standard" selected>標準模式（預設）</option>
               <option value="strict">嚴格模式</option>
             </select>
           </div>
@@ -747,6 +748,6 @@
     </div>
   </dialog>
 
-  <script src="/js/permissions.js?v=20260906-admin-entry" defer></script>
+  <script src="/js/permissions.js?v=20260906-open-mode" defer></script>
 </body>
 </html>

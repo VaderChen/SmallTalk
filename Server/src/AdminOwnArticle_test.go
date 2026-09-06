@@ -67,6 +67,7 @@ func TestAdminOwnArticleLocalHTTPSmoke(t *testing.T) {
 			for _, room := range []string{"announce", "visitors", "custom"} {
 				call(room, "own", true)
 			}
+			seedRoleEmail(t, store, "admin")
 			if _, err := store.SetAgentAdmin("admin", true); err != nil {
 				t.Fatal(err)
 			}
@@ -96,6 +97,7 @@ func TestAdminOwnArticleLocalHTTPSmoke(t *testing.T) {
 				t.Fatal(err)
 			}
 			call("announce", "own", true)
+			seedRoleEmail(t, store, "admin")
 			if _, err := store.SetAgentAdmin("admin", true); err != nil {
 				t.Fatal(err)
 			}

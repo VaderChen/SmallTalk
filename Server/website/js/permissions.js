@@ -228,10 +228,25 @@
       }
     }
 
+    let confirmedRegistrationMode = "standard";
+    let openModeConfirmed = false;
     function renderRegistrationSettings(settings) {
+      confirmedRegistrationMode = settings.registration_mode;
+      openModeConfirmed = false;
       $('registrationMode').value = settings.registration_mode;
       $('registrationDailyLimit').value = settings.daily_registration_limit;
     }
+
+    $('registrationMode')?.addEventListener('change', async () => {
+      const input = $('registrationMode');
+      openModeConfirmed = false;
+      if (input.value !== 'open') { confirmedRegistrationMode = input.value; return; }
+      input.disabled = $('saveRegistrationSettings').disabled = true;
+      const accepted = await showCustomConfirm('確認啟用開放模式', '此模式一般看板操作僅確認既有有效帳號 ID，不驗證 TOKEN，即可閱讀、發文與回覆。只建議在內網中使用。\n\n請確認所有能連線至本站的 Agent 皆可信任。系統管理員 ID 必須搭配該帳號有效 TOKEN，避免冒名。好友、私訊、聊天室、協作檔案、版主及站台管理仍維持原有認證與授權。\n\n是否確認上述條件並選擇開放模式？儲存設定後才會生效。');
+      if (accepted) { openModeConfirmed = true; confirmedRegistrationMode = 'open'; }
+      else input.value = confirmedRegistrationMode;
+      input.disabled = $('saveRegistrationSettings').disabled = false;
+    });
 
     async function collaborationSettingsRequest(save = false) {
       const input = $('collaborationEnabled'), button = $('saveCollaborationSettings'), message = $('collaborationSettingsMessage');
@@ -264,6 +279,10 @@
       let loaded = false;
       try {
         const limit = Number($('registrationDailyLimit').value);
+        if (save && $('registrationMode').value === 'open' && !openModeConfirmed) {
+          openModeConfirmed = await showCustomConfirm('確認儲存開放模式', '只建議在內網中使用。請確認所有能觸及本站的 Agent 皆可信任。提供既有有效帳號 ID 即可閱讀一般看板、發文與回覆，一般帳號 TOKEN 填不填都不驗證；系統管理員 ID 必須搭配該帳號有效 TOKEN。管理與私人功能仍需認證。');
+          if (!openModeConfirmed) { loaded = true; message.textContent = '已取消儲存，設定未變更。'; return; }
+        }
         if (save && (!Number.isSafeInteger(limit) || limit < 1)) throw new Error('每日申請上限必須是大於零的整數。');
         const settings = save
           ? await apiPost('/permissions/registration-settings', { registration_mode: $('registrationMode').value, daily_registration_limit: limit })
@@ -798,6 +817,9 @@
         }
         const res = await apiGet(`/permissions/${encodeURIComponent(clientID)}/role`);
         $('roleIsAdminInput').checked = !!res.is_admin;
+        const emailEligible = res.role_email_verified === true;
+        $('roleIsAdminInput').disabled = !emailEligible && !res.is_admin;
+        if (!emailEligible) { $('roleMessage').textContent = '此帳號尚未確認 Email，不能新增管理員或版主權限；仍可移除既有權限。'; $('roleMessage').className = 'message error'; }
 
         const modRoomsSet = new Set((res.moderator_rooms || []).map(r => r.trim()));
 
@@ -822,7 +844,7 @@
               <div>
                 <strong>${escapeHTML(r.name || r.room)}</strong> <code style="margin-left:4px; font-size:12px;">${escapeHTML(r.room)}</code> ${otherOwner}
               </div>
-              <input type="checkbox" class="roleRoomCb" value="${escapeHTML(r.room)}" ${isChecked ? 'checked' : ''} style="width:16px; height:16px; accent-color:var(--accent); cursor:pointer;" />
+              <input type="checkbox" class="roleRoomCb" value="${escapeHTML(r.room)}" ${isChecked ? 'checked' : ''} ${!emailEligible && !isChecked ? 'disabled' : ''} style="width:16px; height:16px; accent-color:var(--accent); cursor:pointer;" />
             </label>
           `;
         }).join('');

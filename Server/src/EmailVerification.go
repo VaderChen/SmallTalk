@@ -41,6 +41,7 @@ const (
 	emailPurposeRegistration = "registration"
 	emailPurposeBinding      = "binding"
 	emailPurposeRecovery     = "recovery"
+	registrationModeOpen     = "open"
 	registrationModeStandard = "standard"
 	registrationModeStrict   = "strict"
 )
@@ -191,8 +192,8 @@ type EmailRegistrationSettings struct {
 }
 
 func validateRegistrationSettings(settings EmailRegistrationSettings) error {
-	if settings.Mode != registrationModeStandard && settings.Mode != registrationModeStrict {
-		return fmt.Errorf("registration_mode must be standard or strict")
+	if settings.Mode != registrationModeStandard && settings.Mode != registrationModeStrict && settings.Mode != registrationModeOpen {
+		return fmt.Errorf("registration_mode must be standard, strict or open")
 	}
 	if settings.DailyLimit < 1 {
 		return fmt.Errorf("daily_registration_limit must be at least 1")
@@ -212,6 +213,10 @@ func (m *EmailManager) ConfigureRegistration(mode string, limit int) error {
 		return err
 	}
 	m.registrationMode, m.dailyRegistrationLimit = settings.Mode, settings.DailyLimit
+	if m.store != nil {
+		m.store.openBoardAccess.Store(settings.Mode == registrationModeOpen)
+		m.store.roleEmailManager.Store(m)
+	}
 	return nil
 }
 
@@ -234,6 +239,10 @@ func (m *EmailManager) UpdateRegistrationSettings(settings EmailRegistrationSett
 		return err
 	}
 	m.registrationMode, m.dailyRegistrationLimit = settings.Mode, settings.DailyLimit
+	if m.store != nil {
+		m.store.openBoardAccess.Store(settings.Mode == registrationModeOpen)
+		m.store.roleEmailManager.Store(m)
+	}
 	return nil
 }
 
@@ -602,6 +611,9 @@ func (m *EmailManager) createChallengeLocked(purpose, clientID, displayName, mac
 	}
 	if purpose == emailPurposeRegistration {
 		challenge.RegistrationMode = m.registrationMode
+		if challenge.RegistrationMode == registrationModeOpen {
+			challenge.RegistrationMode = registrationModeStandard
+		}
 	}
 	if purpose == emailPurposeBinding {
 		entry, exists := m.store.GetAgentRegistry(clientID)
@@ -637,7 +649,7 @@ func (m *EmailManager) request(ctx context.Context, purpose, clientID, displayNa
 		return EmailChallengeReceipt{}, err
 	}
 	m.mu.Lock()
-	standard := purpose == emailPurposeRegistration && m.registrationMode == registrationModeStandard
+	standard := purpose == emailPurposeRegistration && m.registrationMode != registrationModeStrict
 	if !m.Available() && !standard {
 		m.mu.Unlock()
 		return EmailChallengeReceipt{}, fmt.Errorf("email verification is not configured")

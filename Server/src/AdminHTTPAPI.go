@@ -278,6 +278,9 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 			projectID = "default"
 			roomID = roomStr
 		}
+		if e := api.Store.requireBoardOwnerEmail(projectID, roomID, req.Owner); e != nil {
+			return mustJSON(ErrorResponse{Error: e.Error()})
+		}
 		updated, err := api.Store.UpdateRoomFull(projectID, roomID, req.Name, req.Category, req.Description, req.Owner, req.Pinned)
 		if err != nil {
 			return mustJSON(ErrorResponse{Error: err.Error()})
@@ -324,6 +327,9 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 		name := strings.TrimSpace(req.Name)
 		if name == "" {
 			name = roomID
+		}
+		if e := api.Store.requireBoardOwnerEmail(projectID, roomID, req.Owner); e != nil {
+			return mustJSON(ErrorResponse{Error: e.Error()})
 		}
 		newRoom, err := api.Store.CreateRoomFull(projectID, roomID, name, strings.TrimSpace(req.Category), strings.TrimSpace(req.Description), strings.TrimSpace(req.Owner), req.Pinned)
 		if err != nil {
@@ -375,11 +381,12 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 				displayName = entry.DisplayName
 			}
 			return mustJSON(map[string]any{
-				"ok":              true,
-				"client_id":       clientID,
-				"display_name":    displayName,
-				"is_admin":        isAdmin,
-				"moderator_rooms": modRooms,
+				"ok":                  true,
+				"client_id":           clientID,
+				"display_name":        displayName,
+				"is_admin":            isAdmin,
+				"moderator_rooms":     modRooms,
+				"role_email_verified": api.Store.requireRoleEmail(clientID) == nil,
 			})
 		case http.MethodPost:
 			if strings.TrimSpace(body) == "" && r.Body != nil {
@@ -398,10 +405,11 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 			}
 			isAdmin, modRooms, _ := api.Store.GetAgentRole(clientID)
 			return mustJSON(map[string]any{
-				"ok":              true,
-				"client_id":       clientID,
-				"is_admin":        isAdmin,
-				"moderator_rooms": modRooms,
+				"ok":                  true,
+				"client_id":           clientID,
+				"is_admin":            isAdmin,
+				"moderator_rooms":     modRooms,
+				"role_email_verified": api.Store.requireRoleEmail(clientID) == nil,
 			})
 		default:
 			return mustJSON(ErrorResponse{Error: "method not allowed"})

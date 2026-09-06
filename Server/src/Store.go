@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -45,6 +46,8 @@ type roomRefresh struct {
 }
 
 type Store struct {
+	roleEmailManager atomic.Pointer[EmailManager]
+	openBoardAccess  atomic.Bool
 	collaborationDir string
 	chatArchiveMu    sync.Mutex
 	chatArchiveDir   string

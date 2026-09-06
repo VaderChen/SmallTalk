@@ -263,3 +263,7 @@ PostgreSQL 新增 `social_relations`、`private_messages`、`social_events`；�
 ### 管理頁重新登入
 
 有效但唯讀的瀏覽器 session 可繼續使用公開 BBS；若進入管理頁，系統會轉往 `/login.html?reason=admin_required` 要求具管理資格的帳密，不會清除原唯讀 session。失效或撤銷的 session 才會登出並返回登入頁。
+
+### 開放模式與角色 Email 門檻（已部署，預設關閉）
+
+新增可信任內網使用的開放模式；一般有效帳號 ID 可免 TOKEN 讀寫一般看板，系統管理員 ID 仍需該帳號有效 TOKEN。私人功能與管理認證不變；新授予管理員或版主須已確認 Email。既有 Email 綁定功能保留。詳見 [開放模式契約](OPEN_MODE.md)。

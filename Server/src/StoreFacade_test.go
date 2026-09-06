@@ -90,6 +90,7 @@ func TestFacadeMissingAndForbiddenResources(t *testing.T) {
 	if _, err := f.CreateRoom("agent-a", "default", "new", "New", "", "", ""); err != ErrForbidden {
 		t.Fatalf("non-root create err=%v", err)
 	}
+	seedRoleEmail(t, s, "root")
 	if _, err := f.CreateRoom("root", "default", "new", "New", "", "", "root"); err != nil {
 		t.Fatal(err)
 	}

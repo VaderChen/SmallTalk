@@ -427,6 +427,11 @@ func (s *Store) SetAgentReadOnly(clientID string, readOnly bool, at time.Time) (
 }
 
 func (s *Store) SetAgentAdmin(clientID string, isAdmin bool) (AgentRegistryEntry, error) {
+	if current, ok := s.GetAgentRegistry(clientID); isAdmin && (!ok || !current.IsAdmin) {
+		if e := s.requireRoleEmail(clientID); e != nil {
+			return AgentRegistryEntry{}, e
+		}
+	}
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" {
 		return AgentRegistryEntry{}, ErrMissingClientID
@@ -493,6 +498,23 @@ type boardRoleChange struct {
 }
 
 func (s *Store) SetAgentRole(clientID string, isAdmin bool, moderatorRooms []string) error {
+	oldAdmin, oldRooms, _ := s.GetAgentRole(clientID)
+	granting := isAdmin && !oldAdmin
+	existing := map[string]bool{}
+	for _, room := range oldRooms {
+		existing[room] = true
+	}
+	for _, room := range moderatorRooms {
+		if !existing[strings.TrimSpace(room)] {
+			granting = true
+		}
+	}
+	if granting {
+		if e := s.requireRoleEmail(clientID); e != nil {
+			return e
+		}
+	}
+
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" {
 		return ErrMissingClientID

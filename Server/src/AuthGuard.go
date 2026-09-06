@@ -37,7 +37,7 @@ func (ctx *requestAuthContext) IsSystem() bool {
 }
 
 func (ctx *requestAuthContext) IsRoot() bool {
-	if ctx == nil || ctx.ReadOnly {
+	if ctx == nil || ctx.ReadOnly || ctx.Kind == "open-board" {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(ctx.ClientID), "root") || strings.EqualFold(strings.TrimSpace(ctx.PrincipalType), "root")

@@ -15,6 +15,7 @@ func TestRoleSettingsLocalPersistenceAndFailure(t *testing.T) {
 	if _, err := store.CreateRoom("default", "role-local", "版主測試", "", "", "舊版主名稱"); err != nil {
 		t.Fatal(err)
 	}
+	seedRoleEmail(t, store, "role-owner")
 	if err := store.SetAgentRole("role-owner", true, []string{"default/role-local"}); err != nil {
 		t.Fatal(err)
 	}

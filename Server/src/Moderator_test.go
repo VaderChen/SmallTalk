@@ -12,6 +12,9 @@ import (
 
 func TestModeratorPermissionsAndActions(t *testing.T) {
 	store := NewStore(t.TempDir(), 200, false)
+	_, _ = store.UpsertAgentRegistry(AgentRegistryUpsert{ClientID: "agent-hermes", DisplayName: "峨嵋派Hermes"})
+	seedRoleEmail(t, store, "agent-hermes")
+	seedRoleEmail(t, store, "system")
 	facade := &SmallTalkFacade{Store: store}
 
 	// Create rooms
@@ -245,6 +248,9 @@ func TestModeratorPermissionsAndActions(t *testing.T) {
 
 func TestModeratorReplyDeleteRejectsArticleRootAndPinIsIdempotent(t *testing.T) {
 	store := NewStore(t.TempDir(), 100, false)
+	_, _ = store.UpsertAgentRegistry(AgentRegistryUpsert{ClientID: "agent-hermes", DisplayName: "峨嵋派Hermes"})
+	seedRoleEmail(t, store, "agent-hermes")
+	seedRoleEmail(t, store, "system")
 	facade := &SmallTalkFacade{Store: store}
 	if _, err := facade.CreateRoom("root", "default", "moderation", "Moderation", "test", "", "system"); err != nil {
 		t.Fatal(err)
@@ -268,6 +274,9 @@ func TestModeratorReplyDeleteRejectsArticleRootAndPinIsIdempotent(t *testing.T) 
 
 func TestMCPModeratorToolsAndIsModerator(t *testing.T) {
 	store := NewStore(t.TempDir(), 200, false)
+	_, _ = store.UpsertAgentRegistry(AgentRegistryUpsert{ClientID: "agent-hermes", DisplayName: "峨嵋派Hermes"})
+	seedRoleEmail(t, store, "agent-hermes")
+	seedRoleEmail(t, store, "system")
 	facade := &SmallTalkFacade{Store: store}
 
 	_, _ = facade.CreateRoom("root", "default", "emei", "峨嵋軼事", "閒聊", "峨嵋派討論區", "峨嵋派Hermes")

@@ -28,13 +28,23 @@ func webViewReadOnlyMiddleware(store *Store) mcp.Middleware {
 					r.RemoteAddr = old.SourceIP
 				}
 				p, ok := requireAuthorizedRequest(r, nil, store)
+				if open, err := store.openBoardPrincipal(r); err != nil {
+					return mcpToolError(err)
+				} else if open != nil {
+					p, ok = open, true
+				}
 				if !ok {
-					if len(candidateAuthTokens(r)) > 0 {
+					if len(candidateAuthTokens(r)) > 0 && !store.openBoardAccess.Load() {
 						return nil, ErrForbidden
 					}
 					p = &requestAuthContext{Kind: "guest", PrincipalType: "guest", ClientID: "Guest", SourceIP: r.RemoteAddr}
 				}
 				ctx = context.WithValue(ctx, mcpPrincipalKey{}, p)
+			}
+			if p, ok := mcpPrincipalFromContext(ctx); ok && p.Kind == "open-board" {
+				if call, ok := req.(*mcp.CallToolRequest); ok && !openBoardTool(call.Params.Name) {
+					return mcpToolError(fmt.Errorf("開放模式僅限一般看板；此工具仍須有效 TOKEN"))
+				}
 			}
 			if call, ok := req.(*mcp.CallToolRequest); ok {
 				name := call.Params.Name

@@ -58,6 +58,7 @@ func TestAdminRoleIsolatedPostgresPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedRoleEmail(t, store, entry.ClientID)
 	if _, err := store.SetAgentAdmin(entry.ClientID, true); err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +89,7 @@ func TestAdminRoleIsolatedPostgresPersistence(t *testing.T) {
 	if isAgentAdmin(store, entry.ClientID) {
 		t.Fatal("撤銷角色被舊資料覆蓋")
 	}
+	seedRoleEmail(t, store, entry.ClientID)
 	if _, err := store.SetAgentAdmin(entry.ClientID, true); err != nil {
 		t.Fatal(err)
 	}

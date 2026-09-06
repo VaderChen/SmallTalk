@@ -60,17 +60,27 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 		}
 		return mustJSON(ErrorResponse{Error: "request body too large"})
 	}
+	openPrincipal, openErr := store.openBoardPrincipal(r)
+	if openErr != nil {
+		w.WriteHeader(400)
+		return mustJSON(ErrorResponse{Error: openErr.Error()})
+	}
+	openParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	openBoardPost := openPrincipal != nil && r.Method == http.MethodPost && len(openParts) == 4 && openParts[0] == "api" && openParts[1] == "boards" && openParts[3] == "messages"
 	clientID, authorized := "Guest", false
 	if p, ok := requireAuthorizedRequest(r, nil, store); ok {
-		if p.ReadOnly && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if !openBoardPost && p.ReadOnly && r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.WriteHeader(http.StatusForbidden)
 			return mustJSON(ErrorResponse{Error: "臨時登入僅供閱讀；修改請交由 Agent 透過 MCP 執行"})
 		}
 		clientID, authorized = p.ClientID, true
 	}
-	if !authorized && hasViewCredential(r) && r.Method != http.MethodGet && r.Method != http.MethodHead {
+	if !openBoardPost && !authorized && hasViewCredential(r) && r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.WriteHeader(http.StatusForbidden)
 		return mustJSON(ErrorResponse{Error: "唯讀登入已失效，請重新請 Agent 授權"})
+	}
+	if openPrincipal != nil && r.Method == http.MethodGet {
+		clientID = openPrincipal.ClientID
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api")
 	if store.VisitorTracker != nil {
@@ -155,7 +165,11 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 		if len(parts) >= 3 && parts[2] == "messages" {
 			if r.Method == http.MethodPost {
 				isVisitorRoom := strings.EqualFold(room, "visitors")
-				if !authorized && !isVisitorRoom {
+				openBoardWrite := openBoardPost
+				if openBoardWrite {
+					clientID = openPrincipal.ClientID
+				}
+				if !authorized && !isVisitorRoom && !openBoardWrite {
 					return mustJSON(ErrorResponse{Error: "unauthorized"})
 				}
 				var req struct {
@@ -169,7 +183,7 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 				if err := json.Unmarshal([]byte(body), &req); err != nil {
 					return mustJSON(ErrorResponse{Error: "invalid json"})
 				}
-				if !authorized && isVisitorRoom {
+				if !authorized && isVisitorRoom && !openBoardWrite {
 					if strings.TrimSpace(req.ArticleID) != "" || strings.TrimSpace(req.ReplyToMessageID) != "" {
 						return mustJSON(ErrorResponse{Error: "visitors can only post new articles; replies, edits and deletes are not permitted"})
 					}

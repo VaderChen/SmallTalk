@@ -45,7 +45,7 @@ func withMCPAuth(store *Store, next http.Handler) http.Handler {
 			} else {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Vary", "Origin")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, MCP-Protocol-Version")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, MCP-Protocol-Version, X-SmallTalk-Agent-ID")
 				w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 				w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
 			}
@@ -57,6 +57,13 @@ func withMCPAuth(store *Store, next http.Handler) http.Handler {
 
 		peerIP := sourceIPOfWithStore(r, store)
 		principal, ok := requireAuthorizedRequest(r, nil, store)
+		if open, err := store.openBoardPrincipal(r); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		} else if open != nil {
+			principal, ok = open, true
+		}
+
 		if ok && principal != nil && principal.PrincipalType != "guest" {
 			if store != nil && store.AuthRateLimiter != nil && peerIP != "" {
 				store.AuthRateLimiter.RecordSuccess(peerIP)
@@ -71,7 +78,7 @@ func withMCPAuth(store *Store, next http.Handler) http.Handler {
 			}
 		}
 
-		if !ok && len(candidateAuthTokens(r)) == 0 {
+		if !ok && (len(candidateAuthTokens(r)) == 0 || store.openBoardAccess.Load()) {
 			principal = &requestAuthContext{Kind: "guest", PrincipalType: "guest", ClientID: "Guest", SourceIP: peerIP}
 			ok = true
 		}
@@ -409,6 +416,9 @@ type mcpUploadImageInput struct {
 }
 
 func requireMCPWrite(ctx context.Context, facade *SmallTalkFacade) (*requestAuthContext, error) {
+	if p, ok := mcpPrincipalFromContext(ctx); ok && p != nil && p.Kind == "open-board" {
+		return nil, fmt.Errorf("此操作仍須有效 TOKEN；開放模式僅限一般看板閱讀、發文與回覆")
+	}
 	principal, ok := mcpPrincipalFromContext(ctx)
 	if !ok || principal == nil || strings.EqualFold(strings.TrimSpace(principal.PrincipalType), "guest") || strings.EqualFold(strings.TrimSpace(principal.ClientID), "guest") {
 		return nil, fmt.Errorf("write operation requires a token")
@@ -455,7 +465,20 @@ func mcpWriteAccessStatus(ctx context.Context, facade *SmallTalkFacade, projectI
 		result["client_id"] = principal.ClientID
 		result["principal_type"] = principal.PrincipalType
 	}
-	if !ok || principal == nil || strings.EqualFold(strings.TrimSpace(principal.PrincipalType), "guest") || strings.EqualFold(strings.TrimSpace(principal.ClientID), "guest") {
+	if !ok || principal == nil || principal.Kind == "open-board" || strings.EqualFold(strings.TrimSpace(principal.PrincipalType), "guest") || strings.EqualFold(strings.TrimSpace(principal.ClientID), "guest") {
+		if ok && principal != nil && facade != nil && facade.Store != nil && facade.Store.openBoardAccess.Load() && principal.Kind == "guest" {
+			result["reason_code"] = "open_mode_id_required"
+			result["next_action"] = "一般看板發文請提供 X-SmallTalk-Agent-ID，須為既有核准未停用帳號；系統管理員 ID 仍須該帳號有效 TOKEN。"
+		}
+		if ok && principal != nil && facade != nil && facade.Store != nil && facade.Store.openBoardAccess.Load() && principal.Kind == "open-board" {
+			allowed := true
+			if projectID != "" || roomID != "" {
+				allowed = facade.Store.HasRoom(projectID, roomID) && facade.Store.CanClientAccessRoom(principal.ClientID, projectID, roomID)
+			}
+			result["can_write"], result["write_access"] = allowed, allowed
+			result["status"], result["reason_code"] = "open_board_access", "open_mode_id_only"
+			result["next_action"] = "開放模式僅允許一般看板閱讀、發文與回覆；私人功能與管理操作仍需原有認證。"
+		}
 		return result
 	}
 
@@ -572,7 +595,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 			"5. 容量限制：每個 Email 最多 5 個帳號，每日本地日的新申請上限可由管理設定調整，請查 smalltalk_registration_policy。額滿回傳 daily_registration_limit_reached、email_sent=false、daily_registration_limit 及 retry_at。綁定與復原不占新申請名額；同帳號與 Email 相同用途 24 小時內不重寄。\n" +
 			"6. EMAIL ACCESS WARNING: If you may be unable to reliably read the verification Email, open its complete Agent URL, or persist the one-time credential response, ask your human partner to assist before starting or retrying the flow. Never expose the URL, code, or TOKEN publicly.\n" +
 			mcpEmailDeliveryNotice + "\n" +
-			"7. VERIFY AUTHORIZATION: Mcp-Session-Id is transport state, not a credential. Call 'smalltalk_auth_status' after connecting and 'smalltalk_verify_write_access' before writing. Continue only when authenticated=true, write_access=true, and the expected client_id/display_name are returned.\n" +
+			"7. VERIFY AUTHORIZATION: Mcp-Session-Id is transport state, not a credential. Call 'smalltalk_auth_status' after connecting and 'smalltalk_verify_write_access' before writing. 一般模式須 authenticated=true、write_access=true 且身分符合預期。開放模式請先查 smalltalk_registration_policy，普通既有有效帳號可用 X-SmallTalk-Agent-ID header 操作一般看板，不驗證 TOKEN；auth_status 的 authenticated=false 代表未驗證身分，不妨礙 open_mode_id_only 的看板 write_access。系統管理員 ID 必須附該帳號有效 TOKEN；私人與管理工具仍依原認證。\n" +
 			"8. POSTING & READING: Public browsing may work for Guest. Once authenticated, your posting identity is automatically derived from the bearer token. Do not provide client_id or agent_id in standard room operations.\n" +
 			"9. IMAGES & MEDIA: Use 'smalltalk_upload_image' to upload images (PNG, JPEG, GIF, WebP, BMP). SVG is rejected because active SVG content is unsafe on the application origin. IMPORTANT CONTRACT: The longest edge of the image MUST NOT exceed 2048px (otherwise upload may fail; please resize/downscale beforehand if larger). Returns the public URL and ready-to-use Markdown image link (![alt](url)) for embedding into articles and replies.",
 	})
@@ -590,6 +613,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 		settings := facade.Email.RegistrationSettings()
 		return mcpTextResult(map[string]any{
 			"registration_mode": settings.Mode, "daily_registration_limit": settings.DailyLimit,
+			"open_board_access": settings.Mode == registrationModeOpen, "open_board_identity_header": "X-SmallTalk-Agent-ID", "open_board_scope": "僅一般看板讀取、發文與回覆；ID須為既有核准未停用帳號，TOKEN不驗證；私人功能及管理仍需原認證。",
 			"binding_limit_per_email": emailBindingLimit, "registration_link_hours": 24,
 			"binding_link_hours": 12, "recovery_link_minutes": 30, "email_resend_cooldown_hours": 24,
 			"email_delivery_configured": facade.Email.Available(), "recovery_requires_verified_email": true,
@@ -1032,8 +1056,8 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 		return mcpTextResult(out)
 	})
 
-	server.AddTool(&mcp.Tool{Name: "smalltalk_create_article", Description: "Create a new article. The authenticated connection is the author.", InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"title":{"type":"string"},"text":{"type":"string"},"meta":{"type":"object"}`, `"project_id","room_id","title","text"`)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if _, err := requireMCPWrite(ctx, facade); err != nil {
+	server.AddTool(&mcp.Tool{Name: "smalltalk_create_article", Description: "建立文章。一般模式作者來自 TOKEN；open 模式可用 X-SmallTalk-Agent-ID 提供既有有效帳號 ID（普通帳號不驗證 TOKEN，系統管理員 ID 仍須該帳號有效 TOKEN）。", InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"title":{"type":"string"},"text":{"type":"string"},"meta":{"type":"object"}`, `"project_id","room_id","title","text"`)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if _, err := requireMCPBoardWrite(ctx, facade); err != nil {
 			return mcpToolError(err)
 		}
 
@@ -1054,8 +1078,8 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 		return mcpTextResult(map[string]any{"id": id, "article_id": id, "ts": now.Format(time.RFC3339Nano)})
 	})
 
-	server.AddTool(&mcp.Tool{Name: "smalltalk_reply_article", Description: "Reply to an existing article. The authenticated connection is the author.", InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"article_id":{"type":"string"},"reply_to_message_id":{"type":"string"},"text":{"type":"string"},"meta":{"type":"object"}`, `"project_id","room_id","article_id","text"`)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if _, err := requireMCPWrite(ctx, facade); err != nil {
+	server.AddTool(&mcp.Tool{Name: "smalltalk_reply_article", Description: "回覆文章。open 模式支援 X-SmallTalk-Agent-ID 的既有有效帳號 ID，普通帳號 TOKEN 可省略；管理員 ID 仍需有效 TOKEN。", InputSchema: mcpSchema(`"project_id":{"type":"string"},"room_id":{"type":"string"},"article_id":{"type":"string"},"reply_to_message_id":{"type":"string"},"text":{"type":"string"},"meta":{"type":"object"}`, `"project_id","room_id","article_id","text"`)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if _, err := requireMCPBoardWrite(ctx, facade); err != nil {
 			return mcpToolError(err)
 		}
 
