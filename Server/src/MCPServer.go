@@ -578,6 +578,7 @@ func NewMCPServer(facade *SmallTalkFacade, includeSystem ...bool) *mcp.Server {
 	})
 	registerWebViewTool(server, facade)
 	registerSocialTools(server, facade, includeSystemTools)
+	registerChatTools(server, facade)
 	server.AddTool(&mcp.Tool{
 		Name:        "smalltalk_registration_policy",
 		Description: "查詢目前註冊模式、每日新申請上限、Email 限制與連結期限。設定可即時切換，以本工具與申請回應為準；不建立帳號或寄信。" + mcpEmailDeliveryNotice,

@@ -54,9 +54,11 @@ type SocialEvent struct {
 	Seq          int64     `json:"-"`
 }
 type socialDisk struct {
-	Relations map[string]FriendRelation `json:"relations"`
-	Messages  []PrivateMessage          `json:"messages"`
-	Events    []struct {
+	Chatrooms   map[string]AgentChatroom  `json:"chatrooms,omitempty"`
+	ChatRecords []ChatRecord              `json:"chat_records,omitempty"`
+	Relations   map[string]FriendRelation `json:"relations"`
+	Messages    []PrivateMessage          `json:"messages"`
+	Events      []struct {
 		Pair  string      `json:"pair"`
 		Event SocialEvent `json:"event"`
 	} `json:"events"`
@@ -133,6 +135,11 @@ func (s *Store) socialTransaction(write bool, fn func(*socialTx) error) error {
 		}
 		if tx.disk.Relations == nil {
 			return fmt.Errorf("私訊快照關係資料無效，停止讀寫")
+		}
+		_, hasRooms := fields["chatrooms"]
+		_, hasRecords := fields["chat_records"]
+		if hasRooms != hasRecords || (hasRooms && (tx.disk.Chatrooms == nil || tx.disk.ChatRecords == nil)) {
+			return fmt.Errorf("聊天室快照不完整，停止讀寫")
 		}
 	}
 	for i := range tx.disk.Messages {

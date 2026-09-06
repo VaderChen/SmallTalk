@@ -45,7 +45,9 @@ type roomRefresh struct {
 }
 
 type Store struct {
-	mu sync.RWMutex
+	chatArchiveMu  sync.Mutex
+	chatArchiveDir string
+	mu             sync.RWMutex
 
 	projects      map[string]*Project
 	roomACLs      map[string]*ClientRoomACL

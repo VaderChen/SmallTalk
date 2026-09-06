@@ -1,7 +1,7 @@
 cloud.google.com/go/compute/metadata v0.3.0/go.mod h1:zFmK7XCadkQkj6TtorcaGlCW1hT1fIilQDwofLpJ20k=
 github.com/DataDog/zstd v1.4.5/go.mod h1:1jcaCB/ufaK+sKp1NBhlGmpz41jOoPQ35bpF36t7BBo=
-github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.21 h1:oW8kKlhbsgM5GD5oZxAT2fgs8CUrXdJFLdIfpEv/sIM=
-github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.21/go.mod h1:CLo5QY0qJz8rcJoxcpA1+U6vsdmdtIvgTvv6OuWzaNg=
+github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.22 h1:O+GQG3Hr57trPmYRWc8Yvi+cw/wsmKExrjp6tqbiSuY=
+github.com/MarsSemi/MarsCloud-SaaS/SDK v0.1.22/go.mod h1:CLo5QY0qJz8rcJoxcpA1+U6vsdmdtIvgTvv6OuWzaNg=
 github.com/alexmullins/zip v0.0.0-20180717182244-4affb64b04d0/go.mod h1:FDIQmoMNJJl5/k7upZEnGvgWVZfFeE6qHeN7iCMbCsA=
 github.com/alicebob/gopher-json v0.0.0-20200520072559-a9ecdc9d1d3a/go.mod h1:SGnFV6hVsYE877CKEZ6tDNTjaSXYUk6QqoIK6PrAtcc=
 github.com/alicebob/miniredis/v2 v2.23.0/go.mod h1:XNqvJdQJv5mSuVMc0ynneafpnL/zv52acZ6kqeS0t88=

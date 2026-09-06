@@ -82,6 +82,16 @@ func RunService() {
 			return
 		}
 	}
+	chatArchiveDir := service.Property.OptString("chat_archive_dir", filepath.Join(dataDir, "chat-archives"))
+	if err := store.ConfigureChatArchive(chatArchiveDir, "./website"); err != nil {
+		Tools.Log.Print(Tools.LL_Error, "聊天室匯出設定無效: %v", err)
+		return
+	}
+	chatInterval := service.Property.OptInt("chat_archive_interval_sec", 300)
+	if chatInterval < 1 {
+		chatInterval = 300
+	}
+
 	if err := store.ConfigureSecurity(propertyStrings(service.Property, "mcp_allowed_origins"), propertyStrings(service.Property, "trusted_proxy_cidrs")); err != nil {
 		Tools.Log.Print(Tools.LL_Error, "invalid security configuration: %v", err)
 		return
@@ -174,6 +184,7 @@ func RunService() {
 	service.RegistryServerInfo(GetVersionTag(), "pack", true)
 	cloud.MCPListeners = startMCPListeners(store, mcpHTTPPort, mcpHTTPSPort, service.Property.OptString("ssl_key", ""), service.Property.OptString("ssl_key_file", ""), emailManager)
 	service.Start()
+	cloud.stopWorkers = append(cloud.stopWorkers, StartChatArchiveWorker(store, time.Duration(chatInterval)*time.Second, func(err error) { Tools.Log.Print(Tools.LL_Error, "聊天室匯出待重試: %v", err) }))
 	shutdown := make(chan struct{})
 	var shutdownOnce sync.Once
 	cloud.stopWorkers = append(cloud.stopWorkers, func() {
