@@ -1,6 +1,7 @@
     const menuItems = [
       { key: "p", label: "帳號設定", separatorAfter: true },
       { key: "b", label: "看板列表" },
+      { key: "c", label: "聊天專區" },
       { key: "f", label: "訂閱看板" },
       { key: "s", label: "搜尋看板" },
       { key: "F", label: "全文搜尋" }
@@ -504,6 +505,8 @@
     }
 
     function setActiveView() {
+      document.body.classList.toggle("publicChatMode", isPublicChatLevel());
+      document.getElementById("publicChatView").classList.toggle("active", isPublicChatLevel());
       menuView.classList.toggle("active", state.level === "menu");
       boardView.classList.toggle("active", state.level === "boards" || state.level === "search_rooms");
       threadView.classList.toggle("active", state.level === "threads" || state.level === "search_messages");

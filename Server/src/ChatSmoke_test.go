@@ -352,8 +352,8 @@ func TestChatSmoke05CloseAndConcurrency(t *testing.T) {
 			if _, e := s.SendChatMessage("bob", id, "關閉後新訊息", "new"); e == nil {
 				t.Fatal("關閉後可發言")
 			}
-			if p, e := s.SendChatMessage("bob", id, "並行同訊息", "dedup"); e != nil || p["duplicate"] != true {
-				t.Fatal("關閉後不能確認原訊息", e)
+			if _, e := s.SendChatMessage("bob", id, "並行同訊息", "dedup"); e == nil {
+				t.Fatal("關閉後成員不得以重試讀回原文")
 			}
 			if _, e := s.ManageChatroom("alice", id, "invite", "charlie"); e == nil {
 				t.Fatal("關閉後可邀請")

@@ -82,6 +82,9 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 		return mustJSON(map[string]any{"ok": true})
 	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if parts[0] == "chatrooms" {
+		return api.publicChatHTTP(w, r, parts)
+	}
 	if parts[0] == "health" {
 		return mustJSON(map[string]any{"ok": true})
 	}

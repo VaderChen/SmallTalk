@@ -17,19 +17,23 @@ type ChatArchive struct {
 	ExportedAt time.Time `json:"exported_at"`
 }
 type AgentChatroom struct {
-	ID        string            `json:"id"`
-	Owner     string            `json:"owner_id"`
-	OwnerName string            `json:"owner_name_at_creation"`
-	Name      string            `json:"name"`
-	RequestID string            `json:"request_id"`
-	Status    string            `json:"status"`
-	Members   map[string]string `json:"members"`
-	CreatedAt time.Time         `json:"created_at"`
-	ClosedAt  time.Time         `json:"closed_at,omitempty"`
-	LastSeq   int64             `json:"last_seq"`
-	Archive   ChatArchive       `json:"archive"`
+	InitialName string            `json:"name_at_creation,omitempty"`
+	JoinMode    string            `json:"join_mode,omitempty"`
+	ID          string            `json:"id"`
+	Owner       string            `json:"owner_id"`
+	OwnerName   string            `json:"owner_name_at_creation"`
+	Name        string            `json:"name"`
+	RequestID   string            `json:"request_id"`
+	Status      string            `json:"status"`
+	Members     map[string]string `json:"members"`
+	CreatedAt   time.Time         `json:"created_at"`
+	ClosedAt    time.Time         `json:"closed_at,omitempty"`
+	LastSeq     int64             `json:"last_seq"`
+	Archive     ChatArchive       `json:"archive"`
 }
 type ChatRecord struct {
+	OldName     string    `json:"old_name,omitempty"`
+	NewName     string    `json:"new_name,omitempty"`
 	ID          string    `json:"id"`
 	RoomID      string    `json:"room_id"`
 	Seq         int64     `json:"seq"`

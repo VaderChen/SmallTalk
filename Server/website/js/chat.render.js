@@ -624,11 +624,14 @@
       _lastChromeLevel = state.level;
       _lastChromeEditable = editable;
 
-      if (state.level === "menu") {
+      if (isPublicChatLevel()) {
+        renderPublicChatChrome();
+      } else if (state.level === "menu") {
         if (levelChanged) {
           subBar.innerHTML = `
             <span data-action="account-settings"><span class="hotkey">p)</span>帳號設定</span>
             <span data-action="goto-boards"><span class="hotkey">b)</span>看板列表</span>
+            <span data-action="public-chatrooms"><span class="hotkey">c)</span>聊天專區</span>
             <span data-action="goto-boards"><span class="hotkey">f)</span>訂閱看板</span>
             <span data-action="search-rooms"><span class="hotkey">s)</span>搜尋看板</span>
             <span data-action="search-messages"><span class="hotkey">F)</span>全文搜尋</span>
@@ -772,6 +775,8 @@
         renderArticle();
       }
 
+      if (isPublicChatLevel()) renderPublicChat();
+      else stopPublicChat();
       renderChrome();
       persistState();
     }

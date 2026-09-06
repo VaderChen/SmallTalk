@@ -275,7 +275,12 @@
     }
 
     async function enterNextLevel() {
+      if (isPublicChatLevel()) { publicChatEnter(); return; }
       if (state.level === "menu") {
+        if (menuItems[state.menuIndex]?.key === "c") {
+          openPublicChatrooms();
+          return;
+        }
         if (menuItems[state.menuIndex]?.key === "p") {
           await openAccountSettings();
           return;
@@ -334,6 +339,7 @@
     }
 
     function backPrevLevel() {
+      if (isPublicChatLevel()) { publicChatBack(); return; }
       if (state.level === "search_article") {
         state.level = "search_messages";
       } else if (state.level === "search_messages") {
@@ -351,6 +357,7 @@
     }
 
     function move(delta) {
+      if (isPublicChatLevel()) { publicChatMove(delta); return; }
       if (state.level === "menu") {
         state.menuIndex = Math.max(0, Math.min(menuItems.length - 1, state.menuIndex + delta));
       } else if (state.level === "search_rooms") {
@@ -417,6 +424,10 @@
           await submitArticle();
           return;
         }
+        return;
+      }
+      if (isPublicChatLevel()) {
+        publicChatKey(event);
         return;
       }
       if (event.key === "ArrowUp") {
@@ -528,6 +539,15 @@
     async function handleUIAction(action) {
       if (!action) return;
       switch (action) {
+        case "chat-refresh":
+          refreshPublicChat();
+          break;
+        case "chat-more":
+          loadPublicChatMore();
+          break;
+        case "public-chatrooms":
+          openPublicChatrooms();
+          break;
         case "account-settings":
           await openAccountSettings();
           break;
@@ -577,7 +597,7 @@
     }
 
     subBar.addEventListener("click", async (e) => {
-      const span = e.target.closest("span[data-action]");
+      const span = e.target.closest("[data-action]");
       if (span) {
         const action = span.getAttribute("data-action");
         await handleUIAction(action);
@@ -585,7 +605,7 @@
     });
 
     noticeBar.addEventListener("click", async (e) => {
-      const span = e.target.closest("span[data-action]");
+      const span = e.target.closest("[data-action]");
       if (span) {
         const action = span.getAttribute("data-action");
         await handleUIAction(action);
@@ -674,6 +694,7 @@
     let touchAccumulatorY = 0;
 
     document.addEventListener("touchstart", (event) => {
+      if (isPublicChatLevel()) return;
       if (
         (dlgBoard && dlgBoard.open) ||
         (dlgArticle && dlgArticle.open) ||
@@ -694,6 +715,7 @@
     }, { passive: true });
 
     document.addEventListener("touchmove", (event) => {
+      if (isPublicChatLevel()) return;
       if (
         (dlgBoard && dlgBoard.open) ||
         (dlgArticle && dlgArticle.open) ||
@@ -714,7 +736,7 @@
       }
 
       // If in article view, allow native smooth touch scrolling for reading
-      if (isArticleLevel()) {
+      if (isArticleLevel() || state.level === "live_chat") {
         touchLastY = t.clientY;
         return;
       }
@@ -738,6 +760,7 @@
     }, { passive: true });
 
     document.addEventListener("touchend", (event) => {
+      if (isPublicChatLevel()) return;
       if (
         (dlgBoard && dlgBoard.open) ||
         (dlgArticle && dlgArticle.open) ||

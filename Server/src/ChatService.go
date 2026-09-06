@@ -17,12 +17,21 @@ func chatRecord(room, actor, name, kind, target, text, request string) ChatRecor
 	now := time.Now()
 	return ChatRecord{ID: xid.New().String(), RoomID: room, Actor: actor, ActorName: name, Kind: kind, Target: target, Text: text, RequestID: request, CreatedAt: now, RetainUntil: now.AddDate(0, 6, 0)}
 }
+func chatJoinMode(r AgentChatroom) string {
+	if r.JoinMode == "public" {
+		return "public"
+	}
+	return "invite"
+}
 func chatView(r AgentChatroom, client string) map[string]any {
-	return map[string]any{"room_id": r.ID, "name": r.Name, "owner_id": r.Owner, "status": r.Status, "membership": r.Members[client], "created_at": r.CreatedAt, "closed_at": r.ClosedAt, "last_seq": r.LastSeq}
+	return map[string]any{"room_id": r.ID, "name": r.Name, "join_mode": chatJoinMode(r), "owner_id": r.Owner, "status": r.Status, "membership": r.Members[client], "created_at": r.CreatedAt, "closed_at": r.ClosedAt, "last_seq": r.LastSeq}
 }
 func (s *Store) chatAccessLocked(r AgentChatroom, client string, write bool) error {
 	if _, err := s.socialAccountLocked(client, write); err != nil {
 		return err
+	}
+	if r.Status == "closed" && client != r.Owner {
+		return ErrForbidden
 	}
 	if client != r.Owner && r.Members[client] != "joined" {
 		return ErrForbidden
@@ -33,6 +42,15 @@ func (s *Store) chatAccessLocked(r AgentChatroom, client string, write bool) err
 	return nil
 }
 func (s *Store) CreateChatroom(client, name, request string) (map[string]any, error) {
+	return s.CreateChatroomWithMode(client, name, request, "invite")
+}
+func (s *Store) CreateChatroomWithMode(client, name, request, mode string) (map[string]any, error) {
+	if mode == "" {
+		mode = "invite"
+	}
+	if mode != "invite" && mode != "public" {
+		return nil, fmt.Errorf("join_mode須為invite或public")
+	}
 	name = strings.TrimSpace(name)
 	if !chatRequestID(request) || !utf8.ValidString(name) || name == "" || utf8.RuneCountInString(name) > 80 || strings.IndexFunc(name, unicode.IsControl) >= 0 {
 		return nil, fmt.Errorf("名稱須為1至80字元；request_id必填且最多128 bytes，不含空白或控制字元")
@@ -48,8 +66,12 @@ func (s *Store) CreateChatroom(client, name, request string) (map[string]any, er
 			return err
 		}
 		if found {
-			if r.Name != name {
-				return fmt.Errorf("request_id已用於不同聊天室名稱")
+			originalName := r.InitialName
+			if originalName == "" {
+				originalName = r.Name
+			}
+			if originalName != name || chatJoinMode(r) != mode {
+				return fmt.Errorf("request_id已用於不同聊天室名稱或加入模式")
 			}
 			result = chatView(r, client)
 			result["duplicate"] = true
@@ -71,7 +93,7 @@ func (s *Store) CreateChatroom(client, name, request string) (map[string]any, er
 		if open >= 100 {
 			return fmt.Errorf("同時開啟的聊天室最多100間")
 		}
-		r = AgentChatroom{ID: xid.New().String(), Owner: client, OwnerName: a.DisplayName, Name: name, RequestID: request, Status: "open", Members: map[string]string{client: "joined"}, CreatedAt: time.Now()}
+		r = AgentChatroom{InitialName: name, JoinMode: mode, ID: xid.New().String(), Owner: client, OwnerName: a.DisplayName, Name: name, RequestID: request, Status: "open", Members: map[string]string{client: "joined"}, CreatedAt: time.Now()}
 		r.Archive = ChatArchive{Directory: filepath.Join(s.chatArchiveDir, r.ID), Filename: chatArchiveFilename}
 		if err := tx.appendChat(&r, chatRecord(r.ID, client, a.DisplayName, "opened", "", "", "")); err != nil {
 			return err
@@ -103,6 +125,35 @@ func (s *Store) ManageChatroom(client, id, action, peer string) (map[string]any,
 		target := peer
 		noop := false
 		switch action {
+		case "join":
+			target = client
+			if chatJoinMode(r) != "public" {
+				return fmt.Errorf("此聊天室須由發起者邀請好友")
+			}
+			if r.Members[client] == "removed" {
+				return fmt.Errorf("已被移除，需發起者重新邀請")
+			}
+			if client != r.Owner {
+				if _, err := s.socialAccountLocked(r.Owner, false); err != nil {
+					return ErrForbidden
+				}
+				relation, err := tx.relation(client, r.Owner)
+				if err != nil {
+					return err
+				}
+				if relation.BlockedA || relation.BlockedB {
+					return ErrForbidden
+				}
+			}
+			if r.Members[client] == "joined" {
+				noop = true
+				break
+			}
+			if len(r.Members) >= 100 && r.Members[client] == "" {
+				return fmt.Errorf("每個聊天室最多100個不同帳號")
+			}
+			r.Members[client] = "joined"
+
 		case "invite":
 			if client != r.Owner {
 				return ErrForbidden
@@ -198,6 +249,11 @@ func (s *Store) ManageChatroom(client, id, action, peer string) (map[string]any,
 		}
 		result = chatView(r, client)
 		result["unchanged"] = noop
+		if action == "close" {
+			delete(s.chatPresence, id)
+		} else if action == "leave" || action == "remove" {
+			delete(s.chatPresence[id], target)
+		}
 		return nil
 	})
 	if err != nil {
@@ -290,20 +346,37 @@ func (s *Store) ReadChatroom(client, id string, after int64, limit int) (map[str
 	return result, err
 }
 func (s *Store) ListChatrooms(client, after string, limit int) (map[string]any, error) {
+	return s.ListChatroomsScope(client, after, limit, "mine")
+}
+func (s *Store) ListChatroomsScope(client, after string, limit int, scope string) (map[string]any, error) {
+	if scope == "" {
+		scope = "mine"
+	}
+	if scope != "mine" && scope != "public" {
+		return nil, fmt.Errorf("scope須為mine或public")
+	}
 	var result map[string]any
 	limit = socialLimit(limit)
 	err := s.socialTransaction(false, func(tx *socialTx) error {
 		if _, err := s.socialAccountLocked(client, false); err != nil {
 			return err
 		}
-		rooms, err := tx.chatRooms(client)
+		queryClient := client
+		if scope == "public" {
+			queryClient = ""
+		}
+		rooms, err := tx.chatRooms(queryClient)
 		if err != nil {
 			return err
 		}
 		out := []map[string]any{}
 		for _, r := range rooms {
 			state := r.Members[client]
-			if r.ID > after && (r.Owner == client || state == "joined" || state == "invited") {
+			visible := r.Owner == client || (r.Status == "open" && (state == "joined" || state == "invited"))
+			if scope == "public" {
+				visible = r.Status == "open" && chatJoinMode(r) == "public"
+			}
+			if r.ID > after && visible {
 				out = append(out, chatView(r, client))
 			}
 		}
@@ -316,6 +389,48 @@ func (s *Store) ListChatrooms(client, after string, limit int) (map[string]any, 
 			next = out[len(out)-1]["room_id"].(string)
 		}
 		result = map[string]any{"chatrooms": out, "has_more": more, "next_after_id": next}
+		return nil
+	})
+	return result, err
+}
+
+// 改名只改顯示名稱；穩定 ID、成員、加入模式及匯出位置均不變。
+func (s *Store) RenameChatroom(client, id, name string) (map[string]any, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 80 || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+		return nil, fmt.Errorf("聊天室名稱須為1至80字元且不含控制字元")
+	}
+	var result map[string]any
+	err := s.socialTransaction(true, func(tx *socialTx) error {
+		account, err := s.socialAccountLocked(client, true)
+		if err != nil {
+			return err
+		}
+		room, err := tx.chatRoom(id)
+		if err != nil {
+			return err
+		}
+		if room.Owner != client {
+			return ErrForbidden
+		}
+		if room.Status != "open" {
+			return fmt.Errorf("聊天室已關閉，不能更換名稱")
+		}
+		unchanged := room.Name == name
+		if !unchanged {
+			if room.InitialName == "" {
+				room.InitialName = room.Name
+			}
+			record := chatRecord(id, client, account.DisplayName, "rename", "", "", "")
+			record.OldName = room.Name
+			record.NewName = name
+			room.Name = name
+			if err := tx.appendChat(&room, record); err != nil {
+				return err
+			}
+		}
+		result = chatView(room, client)
+		result["unchanged"] = unchanged
 		return nil
 	})
 	return result, err

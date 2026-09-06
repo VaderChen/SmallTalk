@@ -47,6 +47,7 @@ type roomRefresh struct {
 type Store struct {
 	chatArchiveMu  sync.Mutex
 	chatArchiveDir string
+	chatPresence   map[string]map[string]time.Time // 暫態心跳，由 mu 保護
 	mu             sync.RWMutex
 
 	projects      map[string]*Project

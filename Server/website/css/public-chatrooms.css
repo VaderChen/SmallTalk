@@ -1,0 +1,75 @@
+#publicChatView {overflow-y:auto;overscroll-behavior:contain;}
+.liveRoomRow,.tableHead.liveRoomHead {display:grid;grid-template-columns:60px minmax(120px,1fr) minmax(90px,180px) 60px 48px 80px;gap:4px 12px;padding:6px 14px;cursor:pointer;color:#ddd;}
+.liveRoomRow > span:first-child,.liveRoomRow > span:nth-child(4) {color:#ff0;}
+.liveRoomRow span {overflow-wrap:anywhere;}
+.liveRoomRow.activeRow {background:var(--cursor);color:var(--cursor-text);}
+/* 訊息採聊天排列，視覺維持 BBS 方框與等寬字。 */
+.liveMessage {display:flex;align-items:flex-start;gap:10px;padding:10px 14px;}
+.liveAvatar {flex:0 0 32px;height:32px;display:grid;place-items:center;border:1px solid var(--speaker-color,#7ff);color:var(--speaker-color,#7ff);background:#111;}
+.liveMessageBody {min-width:0;max-width:calc(100% - 42px);}
+.liveMessage strong {display:block;color:var(--speaker-color,#7ff);font-weight:normal;margin-bottom:5px;overflow-wrap:anywhere;}
+.liveMessageLine {display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 10px;}
+.liveMessage time {color:#999;font-size:.78em;white-space:nowrap;padding-bottom:3px;}
+.liveMessage p {white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;margin:0;padding:8px 12px;background:#1b1b1b;border-left:2px solid var(--speaker-color,#777);min-width:0;max-width:min(48ch,520px,100%);}
+@media(max-width:600px) {.liveRoomRow,.tableHead.liveRoomHead {grid-template-columns:42px minmax(80px,1fr) 70px 42px 36px;gap:4px 6px;padding:6px;}.liveMessage {padding:8px 6px;gap:8px;}.liveMessageLine {flex-wrap:wrap;gap:4px;}.liveMessage time {flex-basis:100%;}.liveMessage p {padding:6px 9px;}}
+
+.tableHead.liveRoomHead {padding-top:0;padding-bottom:0;cursor:default;color:#000;}
+
+/* 觸控操作不依賴滑鼠懸停或鍵盤。 */
+body.publicChatMode .subBar {flex-wrap:wrap;white-space:normal;gap:4px 12px;padding:4px 8px;}
+body.publicChatMode .subBar button {appearance:none;background:transparent;border:1px solid #444;border-radius:0;color:inherit;font:inherit;min-height:44px;padding:8px 10px;cursor:pointer;touch-action:manipulation;}
+body.publicChatMode .subBar button:focus-visible,.liveRoomRow:focus-visible {outline:2px solid #7ff;outline-offset:-2px;}
+.liveRoomRow {appearance:none;width:100%;min-height:52px;border:0;border-radius:0;background:#000;text-align:left;font:inherit;touch-action:manipulation;}
+body.publicChatMode #breadcrumb {min-width:0;overflow:hidden;text-overflow:ellipsis;}
+body.publicChatMode .tableHead {overflow:hidden;text-overflow:ellipsis;}
+#publicChatView {touch-action:pan-y; -webkit-overflow-scrolling:touch;padding-bottom:env(safe-area-inset-bottom);}
+@media(max-width:680px) {
+ body.publicChatMode .bbsName,body.publicChatMode #statusText {display:none;}
+ body.publicChatMode .subBar {font-size:13px;}
+ .liveRoomRow,.tableHead.liveRoomHead {grid-template-columns:38px minmax(0,1fr) 62px 38px 32px;gap:4px;}
+ .liveMessageBody {max-width:calc(100% - 40px);}
+}
+@media(max-height:500px) and (orientation:landscape) {
+ body.publicChatMode .subBar {font-size:12px;gap:4px;}
+ body.publicChatMode .subBar button {padding:4px 8px;}
+ body.publicChatMode .bottomBar .notice {display:none;}
+}
+
+/* 手機採較緊湊的 BBS 字級，觸控按鈕尺寸維持不變。 */
+@media(max-width:680px) {
+ #publicChatView {font-size:13px;}
+ .liveMessage {gap:7px;padding:7px 6px;}
+ .liveAvatar {flex-basis:26px;height:26px;font-size:12px;}
+ .liveMessageBody {max-width:calc(100% - 33px);}
+ .liveMessage strong {font-size:12px;margin-bottom:4px;}
+ .liveMessage p {font-size:13px;line-height:1.5;padding:6px 8px;}
+ .liveMessage time {font-size:10px;}
+ body.publicChatMode .subBar {font-size:12px;}
+}
+
+/* 與文章列表共用 activeRow 綠點；定位以選取列為基準並保留游標空間。 */
+.liveRoomRow {position:relative;}
+.liveRoomRow,.tableHead.liveRoomHead {padding-left:40px;}
+
+/* 列表沿用文章列表的緊湊列高與選取名稱黃字。 */
+.liveRoomRow.activeRow > span:nth-child(2) {color:var(--yellow);}
+.liveRoomRow,.tableHead.liveRoomHead {padding-top:1px;padding-bottom:1px;line-height:1.55;}
+.liveRoomRow {min-height:0;}
+
+/* 窄螢幕優先保留聊天室名稱、在線人數與加入方式。 */
+.liveRoomRow > span:nth-child(6) {color:var(--cyan);}
+@media(max-width:680px) {
+ .liveRoomRow,.tableHead.liveRoomHead {grid-template-columns:38px minmax(0,1fr) 32px 60px;}
+ .liveRoomRow > :nth-child(3),.liveRoomRow > :nth-child(4),
+ .tableHead.liveRoomHead > :nth-child(3),.tableHead.liveRoomHead > :nth-child(4) {display:none;}
+}
+
+/* 操作列與文章列表一致：文字快捷提示，不顯示按鈕外框。 */
+body.publicChatMode .subBar {min-height:30px;padding:4px 10px;gap:20px;}
+body.publicChatMode .subBar button {border:0;background:transparent;min-height:0;padding:0;line-height:inherit;}
+@media(max-width:680px) {
+ body.publicChatMode .subBar {min-height:26px;padding:2px 8px;gap:12px;}
+}
+@media(pointer:coarse) {
+ body.publicChatMode .subBar button {min-height:44px;}
+}
