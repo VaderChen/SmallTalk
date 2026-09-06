@@ -82,6 +82,22 @@ func (api *BBSAPI) Process(w http.ResponseWriter, r *http.Request, _ *MarsJSON.J
 		return mustJSON(map[string]any{"ok": true})
 	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if parts[0] == "features" && len(parts) == 1 {
+		w.Header().Set("Cache-Control", "no-store")
+		if r.Method != http.MethodGet {
+			w.WriteHeader(405)
+			return mustJSON(ErrorResponse{Error: "僅供讀取"})
+		}
+		enabled, err := store.CollaborationEnabled()
+		if err != nil {
+			w.WriteHeader(503)
+			return mustJSON(ErrorResponse{Error: "功能設定暫時無法讀取"})
+		}
+		return mustJSON(map[string]any{"collaboration_enabled": enabled})
+	}
+	if parts[0] == "collaborations" {
+		return api.publicCollaborationHTTP(w, r, parts)
+	}
 	if parts[0] == "chatrooms" {
 		return api.publicChatHTTP(w, r, parts)
 	}

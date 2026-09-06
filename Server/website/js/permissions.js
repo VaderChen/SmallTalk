@@ -46,12 +46,16 @@
         ?.slice(prefix.length) || '';
     }
 
+    let sessionRedirecting = false;
+    let sessionCheckPromise = null;
     function clearSessionAndRedirect() {
+      if (sessionRedirecting) return;
+      sessionRedirecting = true;
       const expire = 'expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax';
       document.cookie = `smalltalk_account=; ${expire}`;
       document.cookie = `smalltalk_project=; ${expire}`;
       document.cookie = `smalltalk_nickname=; ${expire}`;
-      void fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', keepalive: true });
+      void fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', keepalive: true }).catch(() => {});
       window.location.replace('/login.html');
     }
 
@@ -62,58 +66,59 @@
       };
     }
 
-    async function apiGet(url) {
-      const res = await fetch(url, { credentials: 'same-origin', headers: buildAuthHeaders() });
-      const data = await res.json().catch(() => ({}));
-      if (data && typeof data === 'object' && data.error === 'unauthorized') {
-        clearSessionAndRedirect();
-        throw new Error('unauthorized');
-      }
-      if (!res.ok || data.error) throw new Error(data.error || 'request failed');
-      return data;
-    }
-
-    async function apiPost(url, payload) {
-      const res = await fetch(url, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(payload || {})
-      });
-      const data = await res.json().catch(() => ({}));
-      if (data && typeof data === 'object' && data.error === 'unauthorized') {
-        clearSessionAndRedirect();
-        throw new Error('unauthorized');
-      }
-      if (!res.ok || data.error) throw new Error(data.error || 'request failed');
-      return data;
-    }
-
-    async function apiDelete(url) {
-      const res = await fetch(url, {
-        method: 'DELETE',
-        credentials: 'same-origin',
-        headers: buildAuthHeaders()
-      });
-      const data = await res.json().catch(() => ({}));
-      if (data && typeof data === 'object' && data.error === 'unauthorized') {
-        clearSessionAndRedirect();
-        throw new Error('unauthorized');
-      }
-      if (!res.ok || data.error) throw new Error(data.error || 'request failed');
-      return data;
+    function isUnauthorized(res, data) {
+      return res.status === 401 || String(data?.error || '').trim().toLowerCase() === 'unauthorized';
     }
 
     async function checkSessionAlive() {
-      try {
-        await apiGet('/api/health');
-      } catch (error) {
-        const message = String(error?.message || error || '');
-        if (message.includes('unauthorized')) {
-          clearSessionAndRedirect();
+      if (sessionRedirecting) return false;
+      if (sessionCheckPromise) return sessionCheckPromise;
+      sessionCheckPromise = (async () => {
+        try {
+          const res = await fetch('/auth/session', {credentials: 'same-origin', cache: 'no-store', headers: buildAuthHeaders()});
+          const data = await res.json().catch(() => ({}));
+          // 登入查詢本身遭拒代表無法沿用目前登入；一般 API 的 403 仍須先經此查詢確認。
+          const invalid = isUnauthorized(res, data) || res.status === 403 || String(data?.error || '').trim().toLowerCase() === 'forbidden' || (res.ok && data.ok === true && data.principal_type === 'guest');
+          if (invalid) { clearSessionAndRedirect(); return false; }
+          if (res.ok && data.ok === true) {
+            const canManage = data.auth_state !== 'read_only' && data.can_write !== false &&
+              (String(data.principal_type || '').toLowerCase() === 'root' || String(data.client_id || '').toLowerCase() === 'root');
+            if (!canManage) {
+              // 有效的唯讀／一般登入可繼續瀏覽 BBS，但不能進後台；不撤銷共用 Cookie。
+              sessionRedirecting = true;
+              window.location.replace('/login.html?reason=admin_required');
+              return false;
+            }
+            return true;
+          }
+          return false;
+        } catch (_) {
+          // 網路中斷不代表憑證失效，保留登入供下一次確認。
+          return false;
         }
-      }
+      })();
+      try { return await sessionCheckPromise; }
+      finally { sessionCheckPromise = null; }
     }
+
+    async function apiRequest(url, method = 'GET', payload) {
+      if (sessionRedirecting) throw new Error('登入已失效，正在返回登入頁。');
+      const options = {method, credentials: 'same-origin', cache: 'no-store', headers: buildAuthHeaders()};
+      if (payload !== undefined) {
+        options.headers['Content-Type'] = 'application/json';
+        options.body = JSON.stringify(payload || {});
+      }
+      const res = await fetch(url, options);
+      const data = await res.json().catch(() => ({}));
+      if (isUnauthorized(res, data)) clearSessionAndRedirect();
+      else if (res.status === 403 || String(data?.error || '').trim().toLowerCase() === 'forbidden') await checkSessionAlive();
+      if (sessionRedirecting) throw new Error('登入已失效，正在返回登入頁。');
+      if (!res.ok || data.error) throw new Error(data.error === 'forbidden' ? '目前帳號沒有此操作權限。' : (data.error || 'request failed'));
+      return data;
+    }
+    function apiGet(url) { return apiRequest(url); }
+    function apiPost(url, payload) { return apiRequest(url, 'POST', payload || {}); }
+    function apiDelete(url) { return apiRequest(url, 'DELETE'); }
 
     function roomKey(projectID, roomID) {
       return `${projectID}/${roomID}`;
@@ -227,6 +232,28 @@
       $('registrationMode').value = settings.registration_mode;
       $('registrationDailyLimit').value = settings.daily_registration_limit;
     }
+
+    async function collaborationSettingsRequest(save = false) {
+      const input = $('collaborationEnabled'), button = $('saveCollaborationSettings'), message = $('collaborationSettingsMessage');
+      input.disabled = button.disabled = true;
+      let loaded = false;
+      try {
+        const result = save ? await apiPost('/permissions/collaboration-settings', {enabled: input.checked}) : await apiGet('/permissions/collaboration-settings');
+        input.checked = result.enabled === true;
+        $('collaborationState').textContent = input.checked ? '已啟用' : '已停用';
+        loaded = true;
+        message.className = 'message success';
+        message.textContent = save ? '共同協作設定已儲存並生效。' : '已載入共同協作設定。';
+      } catch (error) {
+        message.className = 'message error'; message.textContent = error.message || '設定操作失敗';
+      } finally {
+        message.style.display = 'block'; input.disabled = button.disabled = !loaded;
+      }
+    }
+    $('collaborationEnabled')?.addEventListener('change', () => {
+      $('collaborationState').textContent = $('collaborationEnabled').checked ? '待儲存：啟用' : '待儲存：停用';
+    });
+    $('saveCollaborationSettings')?.addEventListener('click', () => collaborationSettingsRequest(true));
 
     async function registrationSettingsRequest(save = false) {
       const message = $('registrationSettingsMessage');
@@ -974,6 +1001,7 @@
       } else if (tabKey === 'settings') {
         loadSystemPolicy();
         registrationSettingsRequest();
+        collaborationSettingsRequest();
         emailDeliverySettingsRequest();
       }
     }
@@ -1810,7 +1838,10 @@
       }
     });
 
-    loadAll().catch((error) => {
+    checkSessionAlive().then((alive) => {
+      if (alive) return loadAll();
+      if (!sessionRedirecting) throw new Error('無法確認登入狀態，請重新整理。');
+    }).catch((error) => {
       $('pageMessage').textContent = error.message;
       $('pageMessage').className = 'message error';
     });

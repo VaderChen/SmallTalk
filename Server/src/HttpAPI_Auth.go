@@ -104,7 +104,8 @@ func (h *HttpAPI_auth) Process(w http.ResponseWriter, r *http.Request, jwt *Mars
 	}
 	principal, authenticated := requireAuthorizedRequest(r, nil, h.Store)
 	viewOnly := (authenticated && principal.ReadOnly) || (!authenticated && hasViewCredential(r))
-	if viewOnly && p[0] != "session" && p[0] != "logout" && p[0] != "web-config" && p[0] != "projects" {
+	// 登入使用本次提交的帳密重新驗證，不繼承唯讀權限，也不應被舊唯讀 Cookie 阻擋。
+	if viewOnly && p[0] != "login" && p[0] != "session" && p[0] != "logout" && p[0] != "web-config" && p[0] != "projects" {
 		w.WriteHeader(http.StatusForbidden)
 		return mustJSON(ErrorResponse{Error: "臨時登入僅供閱讀"})
 	}

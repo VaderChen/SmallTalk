@@ -66,6 +66,30 @@ func (api *PermissionsAPI) Process(w http.ResponseWriter, r *http.Request, jwt *
 	}
 
 	parts := splitPathFromBase(r.URL.Path, "/permissions")
+	if len(parts) == 1 && parts[0] == "collaboration-settings" {
+		if r.Method == http.MethodPost {
+			var settings struct {
+				Enabled *bool `json:"enabled"`
+			}
+			if err := json.Unmarshal([]byte(body), &settings); err != nil || settings.Enabled == nil {
+				w.WriteHeader(400)
+				return mustJSON(ErrorResponse{Error: "請提供enabled布林值"})
+			}
+			if err := api.Store.SetCollaborationEnabled(*settings.Enabled); err != nil {
+				w.WriteHeader(500)
+				return mustJSON(ErrorResponse{Error: err.Error()})
+			}
+		} else if r.Method != http.MethodGet {
+			w.WriteHeader(405)
+			return mustJSON(ErrorResponse{Error: "不支援的方法"})
+		}
+		enabled, err := api.Store.CollaborationEnabled()
+		if err != nil {
+			w.WriteHeader(500)
+			return mustJSON(ErrorResponse{Error: "無法讀取功能設定"})
+		}
+		return collaborationSettingsJSON(enabled)
+	}
 	if len(parts) == 1 && parts[0] == "email-delivery-settings" {
 		if api.Email == nil {
 			return mustJSON(ErrorResponse{Error: "email manager unavailable"})

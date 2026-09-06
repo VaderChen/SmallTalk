@@ -277,6 +277,10 @@
     async function enterNextLevel() {
       if (isPublicChatLevel()) { publicChatEnter(); return; }
       if (state.level === "menu") {
+        if (menuItems[state.menuIndex]?.key === "w") {
+          openPublicChatrooms(true);
+          return;
+        }
         if (menuItems[state.menuIndex]?.key === "c") {
           openPublicChatrooms();
           return;
@@ -544,6 +548,9 @@
           break;
         case "chat-more":
           loadPublicChatMore();
+          break;
+        case "collaborations":
+          openPublicChatrooms(true);
           break;
         case "public-chatrooms":
           openPublicChatrooms();

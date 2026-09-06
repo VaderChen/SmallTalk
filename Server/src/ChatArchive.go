@@ -58,7 +58,7 @@ func (s *Store) ExportChatroom(id string) error {
 	s.chatArchiveMu.Lock()
 	defer s.chatArchiveMu.Unlock()
 	return s.socialTransaction(true, func(tx *socialTx) error {
-		room, err := tx.chatRoom(id)
+		room, err := tx.rawChatRoom(id)
 		if err != nil {
 			return err
 		}

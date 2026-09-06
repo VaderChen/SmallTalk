@@ -17,19 +17,21 @@ type ChatArchive struct {
 	ExportedAt time.Time `json:"exported_at"`
 }
 type AgentChatroom struct {
-	InitialName string            `json:"name_at_creation,omitempty"`
-	JoinMode    string            `json:"join_mode,omitempty"`
-	ID          string            `json:"id"`
-	Owner       string            `json:"owner_id"`
-	OwnerName   string            `json:"owner_name_at_creation"`
-	Name        string            `json:"name"`
-	RequestID   string            `json:"request_id"`
-	Status      string            `json:"status"`
-	Members     map[string]string `json:"members"`
-	CreatedAt   time.Time         `json:"created_at"`
-	ClosedAt    time.Time         `json:"closed_at,omitempty"`
-	LastSeq     int64             `json:"last_seq"`
-	Archive     ChatArchive       `json:"archive"`
+	Collaboration bool                  `json:"collaboration,omitempty"`
+	Sandbox       *CollaborationSandbox `json:"sandbox,omitempty"`
+	InitialName   string                `json:"name_at_creation,omitempty"`
+	JoinMode      string                `json:"join_mode,omitempty"`
+	ID            string                `json:"id"`
+	Owner         string                `json:"owner_id"`
+	OwnerName     string                `json:"owner_name_at_creation"`
+	Name          string                `json:"name"`
+	RequestID     string                `json:"request_id"`
+	Status        string                `json:"status"`
+	Members       map[string]string     `json:"members"`
+	CreatedAt     time.Time             `json:"created_at"`
+	ClosedAt      time.Time             `json:"closed_at,omitempty"`
+	LastSeq       int64                 `json:"last_seq"`
+	Archive       ChatArchive           `json:"archive"`
 }
 type ChatRecord struct {
 	OldName     string    `json:"old_name,omitempty"`
@@ -48,12 +50,29 @@ type ChatRecord struct {
 }
 
 func (pg *PostgresStore) initChatSchema() error {
-	_, err := pg.db.Exec(`CREATE TABLE IF NOT EXISTS agent_chatrooms(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,request_id TEXT NOT NULL,payload JSONB NOT NULL,UNIQUE(owner_id,request_id));
+	_, err := pg.db.Exec(`CREATE TABLE IF NOT EXISTS collaboration_settings(id INTEGER PRIMARY KEY CHECK(id=1),enabled BOOLEAN NOT NULL);
+ CREATE TABLE IF NOT EXISTS agent_chatrooms(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,request_id TEXT NOT NULL,payload JSONB NOT NULL,UNIQUE(owner_id,request_id));
  CREATE INDEX IF NOT EXISTS agent_chatrooms_members ON agent_chatrooms USING gin ((payload->'members'));
  CREATE TABLE IF NOT EXISTS agent_chat_records(room_id TEXT NOT NULL,seq BIGINT NOT NULL,id TEXT UNIQUE NOT NULL,actor_id TEXT NOT NULL,request_id TEXT, payload JSONB NOT NULL,PRIMARY KEY(room_id,seq),UNIQUE(room_id,actor_id,request_id));`)
 	return err
 }
 func (t *socialTx) chatRoom(id string) (AgentChatroom, error) {
+	room, err := t.rawChatRoom(id)
+	if err != nil {
+		return room, err
+	}
+	if room.Collaboration {
+		enabled, err := t.collaborationEnabled()
+		if err != nil {
+			return room, err
+		}
+		if !enabled {
+			return room, ErrForbidden
+		}
+	}
+	return room, nil
+}
+func (t *socialTx) rawChatRoom(id string) (AgentChatroom, error) {
 	if t.db == nil {
 		r, ok := t.disk.Chatrooms[id]
 		if !ok {

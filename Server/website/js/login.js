@@ -63,17 +63,20 @@
         });
         const data = await res.json();
         if (!res.ok || data.error) {
-          throw new Error(data.error || 'login failed');
+          throw new Error(res.status === 403 ? '登入請求遭拒絕，請重新整理後再試或聯絡管理員。' : (data.error || '登入服務暫時無法使用。'));
         }
         window.location.replace('/main.html');
       } catch (error) {
-        $('error').textContent = '請輸入正確帳號密碼';
+        $('error').textContent = error.message === 'login failed' ? '請輸入正確帳號密碼' : (error.message || '無法連線至登入服務，請稍後再試。');
         $('submitBtn').disabled = false;
       }
     }
 
     (async () => {
+      const requireAdminLogin = new URLSearchParams(window.location.search).get('reason') === 'admin_required';
+      if (requireAdminLogin) $('error').textContent = '目前登入僅供瀏覽或沒有管理權限，請使用管理員帳號登入。';
       try {
+        if (requireAdminLogin) throw new Error('需要管理員重新登入');
         const res = await fetch('/auth/session', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.ok) {

@@ -12,6 +12,12 @@ func (s *Store) publicChatView(r AgentChatroom) map[string]any {
 	return map[string]any{"active_participant_count": s.chatPresenceCountLocked(r, time.Now()), "join_mode": chatJoinMode(r), "room_id": r.ID, "name": r.Name, "owner_name": r.OwnerName, "status": r.Status, "created_at": r.CreatedAt}
 }
 func (api *BBSAPI) publicChatHTTP(w http.ResponseWriter, r *http.Request, parts []string) []byte {
+	return api.publicChatKindHTTP(w, r, parts, false)
+}
+func (api *BBSAPI) publicCollaborationHTTP(w http.ResponseWriter, r *http.Request, parts []string) []byte {
+	return api.publicChatKindHTTP(w, r, parts, true)
+}
+func (api *BBSAPI) publicChatKindHTTP(w http.ResponseWriter, r *http.Request, parts []string, collaboration bool) []byte {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	fail := func(status int, message string) []byte {
@@ -37,6 +43,16 @@ func (api *BBSAPI) publicChatHTTP(w http.ResponseWriter, r *http.Request, parts 
 	var result map[string]any
 	status := 500
 	err := api.getStore().socialTransaction(false, func(tx *socialTx) error {
+		if collaboration {
+			enabled, e := tx.collaborationEnabled()
+			if e != nil {
+				return e
+			}
+			if !enabled {
+				status = 404
+				return ErrForbidden
+			}
+		}
 		if len(parts) == 1 {
 			rooms, e := tx.chatRooms("")
 			if e != nil {
@@ -44,7 +60,7 @@ func (api *BBSAPI) publicChatHTTP(w http.ResponseWriter, r *http.Request, parts 
 			}
 			out := []map[string]any{}
 			for _, room := range rooms {
-				if room.Status == "open" && room.ID > q.Get("after_id") {
+				if room.Collaboration == collaboration && (!collaboration || (room.Sandbox != nil && room.Sandbox.Ready)) && room.Status == "open" && room.ID > q.Get("after_id") {
 					out = append(out, api.getStore().publicChatView(room))
 					if len(out) > limit {
 						break
@@ -80,7 +96,7 @@ func (api *BBSAPI) publicChatHTTP(w http.ResponseWriter, r *http.Request, parts 
 			status = 404
 			return e
 		}
-		if room.Status != "open" {
+		if room.Collaboration != collaboration || (collaboration && (room.Sandbox == nil || !room.Sandbox.Ready)) || room.Status != "open" {
 			status = 404
 			return ErrForbidden
 		}

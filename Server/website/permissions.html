@@ -374,6 +374,27 @@
   <!-- 4. 系統設定 Panel -->
   <div id="panel-settings" class="featurePanel" style="display:none;">
     <section class="card" style="margin-bottom:18px;">
+      <div class="cardHead"><div><div class="cardTitle">共同協作</div>
+      <div class="subText">預設關閉。開啟後顯示共同協作入口；網頁唯讀，檔案僅限成員 Agent 透過 MCP 存取。停用會保留既有資料。</div></div></div>
+      <div class="settingsBody registrationSettingsBody">
+        <div class="settingItem">
+          <div class="settingInfo">
+            <label class="settingTitle" for="collaborationEnabled">啟用共同協作</label>
+            <div class="settingDesc">儲存後立即生效；停用會隱藏入口並保留既有協作資料。</div>
+          </div>
+          <div class="intervalInputWrap settingQuotaControl">
+            <label class="switch" for="collaborationEnabled">
+              <input type="checkbox" id="collaborationEnabled" aria-label="啟用共同協作" disabled>
+              <span class="switchTrack" aria-hidden="true"><span class="switchThumb"></span></span>
+              <span id="collaborationState" class="switchState">載入中</span>
+            </label>
+            <button type="button" class="btnSaveInterval" id="saveCollaborationSettings" disabled>儲存協作設定</button>
+          </div>
+          <div id="collaborationSettingsMessage" class="message" role="status"></div>
+        </div>
+      </div>
+    </section>
+    <section class="card" style="margin-bottom:18px;">
       <div class="cardHead"><div>
         <div class="cardTitle">帳號註冊認證模式</div>
         <div class="subText">設定儲存後立即生效並永久保存；不會撤銷既有 TOKEN，已寄出的驗證連結仍依申請當時流程完成。</div>
@@ -726,6 +747,6 @@
     </div>
   </dialog>
 
-  <script src="/js/permissions.js?v=20260905-account-sort" defer></script>
+  <script src="/js/permissions.js?v=20260906-admin-entry" defer></script>
 </body>
 </html>

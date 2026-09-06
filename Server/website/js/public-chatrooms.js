@@ -7,7 +7,29 @@ function stopPublicChat() {
   liveChat.generation++;
   liveChat.busy = false;
 }
-function openPublicChatrooms() {
+let collaborationFeatureEnabled = false;
+async function refreshCollaborationFeature() {
+  let enabled = false;
+  try {
+    const response = await fetch('/api/features', {cache: 'no-store', signal: AbortSignal.timeout(10000)});
+    enabled = response.ok && (await response.json()).collaboration_enabled === true;
+  } catch (_) {}
+  if (enabled === collaborationFeatureEnabled) return;
+  collaborationFeatureEnabled = enabled;
+  const selected = menuItems[state.menuIndex]?.key;
+  const existing = menuItems.findIndex(item => item.key === 'w');
+  if (enabled && existing < 0) menuItems.splice(menuItems.findIndex(item => item.key === 'c') + 1, 0, {key: 'w', label: '共同協作'});
+  if (!enabled && existing >= 0) menuItems.splice(existing, 1);
+  state.menuIndex = Math.max(0, menuItems.findIndex(item => item.key === selected));
+  if (!enabled && liveChat.collaboration && isPublicChatLevel()) {
+    stopPublicChat(); liveChat.rooms = []; liveChat.messages = []; liveChat.room = null; state.level = 'menu';
+  }
+  _lastChromeLevel = '';
+  render(true);
+}
+function openPublicChatrooms(collaboration = false) {
+  if (collaboration && !collaborationFeatureEnabled) return;
+  liveChat.collaboration = collaboration;
   stopPublicChat();
   Object.assign(liveChat, {rooms: [], index: 0, room: null, messages: [], cursor: '', seq: 0, more: false, status: '讀取中…', error: ''});
   state.level = 'live_rooms'; render(); fetchPublicChat(false);
@@ -20,7 +42,7 @@ function publicChatEnter() {
   state.level = 'live_chat'; render(); fetchPublicChat(false);
 }
 function publicChatBack() {
-  if (state.level === 'live_chat') {openPublicChatrooms(); return;}
+  if (state.level === 'live_chat') {openPublicChatrooms(liveChat.collaboration); return;}
   stopPublicChat(); state.level = 'menu'; render();
 }
 function publicChatMove(delta) {
@@ -41,7 +63,7 @@ function publicChatKey(event) {
   publicChatMove(({ArrowUp:-1,ArrowDown:1,PageUp:-10,PageDown:10})[key]);
 }
 function refreshPublicChat() {
-  if (state.level === 'live_rooms') return openPublicChatrooms();
+  if (state.level === 'live_rooms') return openPublicChatrooms(liveChat.collaboration);
   stopPublicChat(); liveChat.status = '更新中…'; fetchPublicChat(false);
 }
 function loadPublicChatMore() {if (liveChat.more) fetchPublicChat(true);}
@@ -54,14 +76,14 @@ async function fetchPublicChat(append) {
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
     const path = inRoom ? `/${encodeURIComponent(liveChat.room.room_id)}?after_seq=${liveChat.seq}` : `?after_id=${encodeURIComponent(append ? liveChat.cursor : '')}`;
-    const response = await fetch(`/api/chatrooms${path}`, {cache: 'no-store', signal: controller.signal});
+    const response = await fetch(`${liveChat.collaboration ? "/api/collaborations" : "/api/chatrooms"}${path}`, {cache: 'no-store', signal: controller.signal});
     let data = await response.json();
     // 自動更新已展開的列表頁面，保留分頁進度與選取位置。
     if (!inRoom && !append && response.ok && Array.isArray(data.chatrooms)) {
       const wanted = liveChat.rooms.length;
       const rows = [...data.chatrooms];
       while (rows.length < wanted && data.has_more) {
-        const nextResponse = await fetch(`/api/chatrooms?after_id=${encodeURIComponent(data.next_after_id)}`, {cache:'no-store',signal:controller.signal});
+        const nextResponse = await fetch(`${liveChat.collaboration ? "/api/collaborations" : "/api/chatrooms"}?after_id=${encodeURIComponent(data.next_after_id)}`, {cache:'no-store',signal:controller.signal});
         if (!nextResponse.ok) throw new Error('聊天室列表更新失敗');
         data = await nextResponse.json(); rows.push(...data.chatrooms);
       }
@@ -71,7 +93,7 @@ async function fetchPublicChat(append) {
     if (!response.ok || data.error) {
       // 關閉或移除時清除已顯示內容，不留下可繼續翻閱的前端快照。
       if (response.status === 404 && inRoom) {
-        openPublicChatrooms(); liveChat.status = '聊天室已關閉或不存在，停止公開閱覽。'; render(); return;
+        openPublicChatrooms(liveChat.collaboration); liveChat.status = '聊天室已關閉或不存在，停止公開閱覽。'; render(); return;
       }
       throw new Error(data.error || '讀取失敗');
     }
@@ -152,7 +174,7 @@ function renderPublicChat() {
 }
 function renderPublicChatChrome() {
   const inRoom = state.level === 'live_chat';
-  breadcrumb.textContent = '主選單｜聊天專區' + (inRoom ? `｜${liveChat.room.name}` : '｜LIVE 聊天室');
+  breadcrumb.textContent = ('主選單｜' + (liveChat.collaboration ? '共同協作' : '聊天專區')) + (inRoom ? `｜${liveChat.room.name}` : '｜LIVE 聊天室');
   const toolbar = `<button type="button" data-action="prev"><span class="hotkey">←/Esc)</span>${inRoom ? '返回聊天室列表' : '返回選單'}</button> <button type="button" data-action="chat-refresh"><span class="hotkey">r)</span>重新整理</button>` + (!inRoom ? ' <button type="button" data-action="next"><span class="hotkey">→/Enter)</span>進入聊天室</button>' : ' <span>↑↓/PgUp/PgDn 捲動・唯讀</span>') + (liveChat.more ? ' <button type="button" data-action="chat-more"><span class="hotkey">n)</span>載入更多</button>' : '');
   if (subBar.innerHTML !== toolbar) subBar.innerHTML = toolbar;
   tableHead.className = inRoom ? 'tableHead' : 'tableHead liveRoomHead';

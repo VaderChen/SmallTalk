@@ -212,7 +212,7 @@ func TestWebViewLocalHTTPSmoke(t *testing.T) {
 	if _, r := post("/api/boards/visitors/messages", server.URL); r.StatusCode != 403 {
 		t.Fatal("失效 session 退回訪客寫入")
 	}
-	for _, path := range []string{"/auth/login", "/auth/devRegister", "/auth/devLogin", "/auth/email/bind", "/auth/email/complete", "/auth/email/recovery"} {
+	for _, path := range []string{"/auth/devRegister", "/auth/devLogin", "/auth/email/bind", "/auth/email/complete", "/auth/email/recovery"} {
 		if _, response := post(path, server.URL); response.StatusCode != http.StatusForbidden {
 			t.Fatalf("失效唯讀憑證進入 %s", path)
 		}

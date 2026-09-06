@@ -37,7 +37,7 @@
           return;
         }
         try {
-          await Promise.all([refreshStats(), refreshVisibleData()]);
+          await Promise.all([refreshStats(), refreshVisibleData(), refreshCollaborationFeature()]);
           scheduleRefresh(state.level === "threads" || state.level === "article" ? 5000 : 15000);
         } catch (error) {
           scheduleRefresh(30000);
@@ -52,6 +52,7 @@
 		}
       }, { passive: true });
       try {
+        await refreshCollaborationFeature();
         await loadBoards();
         const requestedEntry = new URLSearchParams(window.location.search).get("entry");
         const restored = restoreState();

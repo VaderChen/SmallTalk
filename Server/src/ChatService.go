@@ -24,7 +24,7 @@ func chatJoinMode(r AgentChatroom) string {
 	return "invite"
 }
 func chatView(r AgentChatroom, client string) map[string]any {
-	return map[string]any{"room_id": r.ID, "name": r.Name, "join_mode": chatJoinMode(r), "owner_id": r.Owner, "status": r.Status, "membership": r.Members[client], "created_at": r.CreatedAt, "closed_at": r.ClosedAt, "last_seq": r.LastSeq}
+	return map[string]any{"collaboration": r.Collaboration, "ready": r.Sandbox != nil && r.Sandbox.Ready, "room_id": r.ID, "name": r.Name, "join_mode": chatJoinMode(r), "owner_id": r.Owner, "status": r.Status, "membership": r.Members[client], "created_at": r.CreatedAt, "closed_at": r.ClosedAt, "last_seq": r.LastSeq}
 }
 func (s *Store) chatAccessLocked(r AgentChatroom, client string, write bool) error {
 	if _, err := s.socialAccountLocked(client, write); err != nil {
@@ -45,6 +45,9 @@ func (s *Store) CreateChatroom(client, name, request string) (map[string]any, er
 	return s.CreateChatroomWithMode(client, name, request, "invite")
 }
 func (s *Store) CreateChatroomWithMode(client, name, request, mode string) (map[string]any, error) {
+	return s.createChatroomKind(client, name, request, mode, false)
+}
+func (s *Store) createChatroomKind(client, name, request, mode string, collaboration bool) (map[string]any, error) {
 	if mode == "" {
 		mode = "invite"
 	}
@@ -57,6 +60,15 @@ func (s *Store) CreateChatroomWithMode(client, name, request, mode string) (map[
 	}
 	var result map[string]any
 	err := s.socialTransaction(true, func(tx *socialTx) error {
+		if collaboration {
+			enabled, e := tx.collaborationEnabled()
+			if e != nil {
+				return e
+			}
+			if !enabled || s.collaborationDir == "" {
+				return fmt.Errorf("共同協作尚未啟用")
+			}
+		}
 		a, err := s.socialAccountLocked(client, true)
 		if err != nil {
 			return err
@@ -70,7 +82,7 @@ func (s *Store) CreateChatroomWithMode(client, name, request, mode string) (map[
 			if originalName == "" {
 				originalName = r.Name
 			}
-			if originalName != name || chatJoinMode(r) != mode {
+			if originalName != name || chatJoinMode(r) != mode || r.Collaboration != collaboration {
 				return fmt.Errorf("request_id已用於不同聊天室名稱或加入模式")
 			}
 			result = chatView(r, client)
@@ -93,7 +105,10 @@ func (s *Store) CreateChatroomWithMode(client, name, request, mode string) (map[
 		if open >= 100 {
 			return fmt.Errorf("同時開啟的聊天室最多100間")
 		}
-		r = AgentChatroom{InitialName: name, JoinMode: mode, ID: xid.New().String(), Owner: client, OwnerName: a.DisplayName, Name: name, RequestID: request, Status: "open", Members: map[string]string{client: "joined"}, CreatedAt: time.Now()}
+		r = AgentChatroom{Collaboration: collaboration, InitialName: name, JoinMode: mode, ID: xid.New().String(), Owner: client, OwnerName: a.DisplayName, Name: name, RequestID: request, Status: "open", Members: map[string]string{client: "joined"}, CreatedAt: time.Now()}
+		if collaboration {
+			r.Sandbox = &CollaborationSandbox{Files: map[string]CollaborationFile{}}
+		}
 		r.Archive = ChatArchive{Directory: filepath.Join(s.chatArchiveDir, r.ID), Filename: chatArchiveFilename}
 		if err := tx.appendChat(&r, chatRecord(r.ID, client, a.DisplayName, "opened", "", "", "")); err != nil {
 			return err
@@ -122,9 +137,32 @@ func (s *Store) ManageChatroom(client, id, action, peer string) (map[string]any,
 		if r.Status != "open" {
 			return fmt.Errorf("聊天室已關閉，不能重新開啟或更動成員")
 		}
+		if r.Collaboration && (r.Sandbox == nil || !r.Sandbox.Ready) && action != "publish" && action != "close" {
+			return fmt.Errorf("發起者須先上傳初始檔案並發布協作空間")
+		}
 		target := peer
 		noop := false
 		switch action {
+		case "publish":
+			if !r.Collaboration || client != r.Owner || r.Sandbox == nil {
+				return ErrForbidden
+			}
+			hasFile := false
+			for _, f := range r.Sandbox.Files {
+				if len(f.Versions) > 0 {
+					hasFile = true
+					break
+				}
+			}
+			if !hasFile {
+				return fmt.Errorf("請先上傳初始協作檔案")
+			}
+			if r.Sandbox.Ready {
+				noop = true
+			} else {
+				r.Sandbox.Ready = true
+			}
+			target = ""
 		case "join":
 			target = client
 			if chatJoinMode(r) != "public" {
@@ -242,6 +280,18 @@ func (s *Store) ManageChatroom(client, id, action, peer string) (map[string]any,
 		default:
 			return fmt.Errorf("不支援的聊天室操作")
 		}
+		if !noop && r.Sandbox != nil && (action == "leave" || action == "remove" || action == "close") {
+			for p, f := range r.Sandbox.Files {
+				if f.Lock != nil && (action == "close" || f.Lock.Owner == target) {
+					f.Lock = nil
+					if len(f.Versions) == 0 {
+						delete(r.Sandbox.Files, p)
+					} else {
+						r.Sandbox.Files[p] = f
+					}
+				}
+			}
+		}
 		if !noop {
 			if err := tx.appendChat(&r, chatRecord(id, client, a.DisplayName, action, target, "", "")); err != nil {
 				return err
@@ -352,8 +402,8 @@ func (s *Store) ListChatroomsScope(client, after string, limit int, scope string
 	if scope == "" {
 		scope = "mine"
 	}
-	if scope != "mine" && scope != "public" {
-		return nil, fmt.Errorf("scope須為mine或public")
+	if scope != "mine" && scope != "public" && scope != "collaborations" && scope != "public_collaborations" {
+		return nil, fmt.Errorf("scope須為mine/public/collaborations/public_collaborations")
 	}
 	var result map[string]any
 	limit = socialLimit(limit)
@@ -362,7 +412,7 @@ func (s *Store) ListChatroomsScope(client, after string, limit int, scope string
 			return err
 		}
 		queryClient := client
-		if scope == "public" {
+		if scope == "public" || scope == "public_collaborations" {
 			queryClient = ""
 		}
 		rooms, err := tx.chatRooms(queryClient)
@@ -373,8 +423,24 @@ func (s *Store) ListChatroomsScope(client, after string, limit int, scope string
 		for _, r := range rooms {
 			state := r.Members[client]
 			visible := r.Owner == client || (r.Status == "open" && (state == "joined" || state == "invited"))
-			if scope == "public" {
+			if scope == "public" || scope == "public_collaborations" {
 				visible = r.Status == "open" && chatJoinMode(r) == "public"
+			}
+			wantCollaboration := scope == "collaborations" || scope == "public_collaborations"
+			if r.Collaboration != wantCollaboration {
+				visible = false
+			}
+			if r.Collaboration {
+				enabled, e := tx.collaborationEnabled()
+				if e != nil {
+					return e
+				}
+				if !enabled {
+					visible = false
+				}
+				if (r.Sandbox == nil || !r.Sandbox.Ready) && client != r.Owner {
+					visible = false
+				}
 			}
 			if r.ID > after && visible {
 				out = append(out, chatView(r, client))

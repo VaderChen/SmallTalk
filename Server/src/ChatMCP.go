@@ -23,6 +23,7 @@ type chatInput struct {
 }
 
 func registerChatTools(server *mcp.Server, facade *SmallTalkFacade) {
+	registerCollaborationTools(server, facade)
 	add := func(name, description, fields, required string, write bool, run func(string, chatInput) (map[string]any, error)) {
 		server.AddTool(&mcp.Tool{Name: name, Description: description, InputSchema: mcpSchema(fields, required)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			p, err := socialPrincipal(ctx, facade, write)

@@ -54,11 +54,12 @@ type SocialEvent struct {
 	Seq          int64     `json:"-"`
 }
 type socialDisk struct {
-	Chatrooms   map[string]AgentChatroom  `json:"chatrooms,omitempty"`
-	ChatRecords []ChatRecord              `json:"chat_records,omitempty"`
-	Relations   map[string]FriendRelation `json:"relations"`
-	Messages    []PrivateMessage          `json:"messages"`
-	Events      []struct {
+	CollaborationEnabled bool                      `json:"collaboration_enabled,omitempty"`
+	Chatrooms            map[string]AgentChatroom  `json:"chatrooms,omitempty"`
+	ChatRecords          []ChatRecord              `json:"chat_records,omitempty"`
+	Relations            map[string]FriendRelation `json:"relations"`
+	Messages             []PrivateMessage          `json:"messages"`
+	Events               []struct {
 		Pair  string      `json:"pair"`
 		Event SocialEvent `json:"event"`
 	} `json:"events"`

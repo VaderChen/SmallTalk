@@ -87,6 +87,10 @@ func RunService() {
 		Tools.Log.Print(Tools.LL_Error, "聊天室匯出設定無效: %v", err)
 		return
 	}
+	if err := store.ConfigureCollaboration(filepath.Join(dataDir, "collaboration-sandboxes"), "./website"); err != nil {
+		Tools.Log.Print(Tools.LL_Error, "共同協作SANDBOX設定失敗: %v", err)
+		return
+	}
 	chatInterval := service.Property.OptInt("chat_archive_interval_sec", 300)
 	if chatInterval < 1 {
 		chatInterval = 300

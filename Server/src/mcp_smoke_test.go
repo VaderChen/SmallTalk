@@ -37,6 +37,7 @@ func TestMCPToolsRegistered(t *testing.T) {
 func assertPublicMCPTools(t *testing.T, names []string) {
 	t.Helper()
 	want := map[string]bool{
+		"smalltalk_create_collaboration": true, "smalltalk_list_collaborations": true, "smalltalk_manage_collaboration": true, "smalltalk_collaboration_lock": true, "smalltalk_collaboration_commit": true, "smalltalk_collaboration_read": true,
 		"smalltalk_chatroom_presence": true, "smalltalk_create_chatroom": true, "smalltalk_list_chatrooms": true, "smalltalk_manage_chatroom": true, "smalltalk_send_chatroom_message": true, "smalltalk_read_chatroom": true, "smalltalk_chatroom_archive": true,
 		"smalltalk_social_policy": true, "smalltalk_list_friends": true, "smalltalk_manage_friend": true, "smalltalk_send_private_message": true, "smalltalk_read_private_messages": true, "smalltalk_list_private_conversations": true, "smalltalk_friend_history": true,
 		"smalltalk_auth_status":                 true,
